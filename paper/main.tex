@@ -102,13 +102,17 @@ on these suites~\cite{helmuth2015lexicase,helmuth2021psb2}. It also has known we
 it overfits the training cases, and generalisation can improve when the run continues after the first program that fits the training
 set~\cite{sobania2021generalizability}. Our protocol keeps a post-solution window and an
 independent adversarial check for the same reason. Combining lexicase selection with novelty search was studied by Jundt and
-Helmuth~\cite{jundt2019novelty}, who found novelty alone to be of limited use for program synthesis; a behaviour-profile novelty term in our
-system gave the same kind of result.
+Helmuth~\cite{jundt2019novelty}, who found that novelty search alone performed poorly on program synthesis and combined it with lexicase selection. A different kind of
+novelty term in our system, over the running-time profile of a program rather than its per-case errors, gave a mixed result on one
+problem pair and eight seeds: it shrank the archive of solutions about a hundredfold and found heap sort in 8 of 8 runs (5 of 8 in
+the control), but discovered no new family of algorithms, and it was not kept.
 
 \paragraph{Search for efficient algorithms and recursion.}
 GP has been used to evolve list-search algorithms, including logarithmic-time search, by Wolfson and Sipper, who generalise the representation
 with automatically defined functions so that the result is not biased towards binary search~\cite{wolfson2010efficient}. This is prior art for
-our own experiments on searching for sub-linear algorithms (not reported here), which we do not present as novel.
+our own experiments on searching for sub-linear algorithms (not reported here). In those, an opt-in piece that halves an interval let the search
+assemble a known logarithmic-time peak search in 9 of 10 runs and a membership search in 5 of 10, failed on a third problem (the minimum
+of a rotated sorted array), and is not part of the default configuration; we do not present it as novel.
 
 \paragraph{Enumerative, syntax-guided and sketch-based synthesis.}
 Syntax-guided synthesis casts the problem as finding an expression, from a grammar, that meets a specification~\cite{alur2013sygus}, and
