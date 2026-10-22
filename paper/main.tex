@@ -1,6 +1,7 @@
 % Working title and structure. Numbers come from docs/claims.md and docs/findings/ (section numbers in comments).
 % Build: see README.md (acmart.cls is generated from template/acmart.ins; no TeX installation was available when this was written).
 \documentclass[sigconf,nonacm]{acmart}
+\usepackage{graphicx}
 
 \settopmatter{printacmref=false}
 \renewcommand\footnotetextcopyrightpermission[1]{}
@@ -147,7 +148,22 @@ published PushGP rates on PSB2~\cite{helmuth2021psb2}.
 \label{sec:results}
 \subsection{PSB2 Integer Subset}
 \label{sec:psb2}
-% Table: section 139 (100 seeds). Intervals (Wilson). Solve-time tail (median 250 s, p90 747 s): budget sensitivity, section 140.
+% Table: section 139 (100 seeds). Intervals (Wilson).
+Figure~\ref{fig:time} shows, for each of the seven problems, the fraction of 100 runs solved as a function of time (a run counts as
+solved at the time its search ends with all 2,000 unseen cases passed; unsolved runs are censored at the 900\,s budget). Four problems
+are solved in all runs, with medians of 4 s (Find Pair), 4 s (Basement), 6 s (GCD) and 39 s (Paired Digits). Fuel Cost and Luhn are solved in 91
+and 90 runs with medians of 250 s and 274 s, and their curves are still rising at the budget: a tenth of the runs end in the last quarter of it.
+Coin Sums reaches 14 runs and is nearly flat after 400 s. The rates for Fuel Cost and Luhn are therefore statements about a 900\,s budget on
+our machine; rerunning ten failed Luhn seeds with 1800\,s solved eight of them (Section~\ref{sec:failures}). Because the budget is a wall-clock
+limit, a run's depth at a given time depends on machine load, so rates near the end of the curve carry timing noise in addition to sampling noise.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.85\textwidth]{figures/success_vs_time}
+  \caption{Fraction of runs solved against time, 100 runs per problem (seeds 80000--80099), integer subset of PSB2. (a) The four problems
+  solved in every run, log time axis. (b) The three that use the budget. Counts in the legends are solved runs out of 100.}
+  \label{fig:time}
+\end{figure*}
 \subsection{Ablation of the Pieces}
 % 34/210 -> 178/210 at 30 seeds (126, 131); battery cost (755 vs 759); high-P cost on elements\_twice.
 \subsection{Transfer to Unseen Problems}
@@ -156,6 +172,7 @@ published PushGP rates on PSB2~\cite{helmuth2021psb2}.
 \subsection{A Narrow Piece That Does Transfer Within Its Family}
 % Sections 136--138: count-term failed, count-mod worked (0/80 -> 63/80, control 0/20); battery 758 vs 755.
 \subsection{Failure Analysis}
+\label{sec:failures}
 % Section 140: long solve-time tail; 8/10 luhn failures solve at 1800 s; parity-term attractor in fuel\_cost (E1).
 
 \section{Discussion and Limitations}
