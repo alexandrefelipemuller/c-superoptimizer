@@ -9,7 +9,7 @@
 
 \begin{document}
 
-\title{Beam Search over an Imperative AST for Program Synthesis Without Learning: What Generic Pieces Buy, and What They Do Not}
+\title{Beam Search over an Imperative AST for Program Synthesis Without Learning: What Transfers and What Does Not}
 
 \author{Alexandre Felipe Muller de Souza}
 \affiliation{%
@@ -37,8 +37,10 @@ raising four related problems from 0 of 80 to 63 of 80 runs. Predictions were re
 
 \section{Introduction}
 
-Program synthesis from input--output examples asks for a program, not a function approximation: the result can be read, tested
-outside the examples, and reasoned about. The field has two long-standing non-neural lines, genetic programming (GP) and
+Writing a program from a handful of examples is a task people do every day, and teaching machines to do it is one of the oldest goals
+of artificial intelligence. Today the attention is on large neural models that produce code directly, which makes it easy to forget that
+program synthesis from input--output examples asks for something different from approximating a function: the result is a program that can
+be read, tested outside the examples, and reasoned about, and a search that finds it need not learn anything from other programs. The field has two long-standing non-neural lines, genetic programming (GP) and
 enumerative or constraint-based synthesis, and, more recently, large neural models that write code directly. The first two have a
 shared yardstick in the General Program Synthesis Benchmark Suite and its successor PSB2~\cite{helmuth2015psb1,helmuth2021psb2},
 whose protocol (200 training cases, 2,000 unseen test cases, a budget of 60 million program executions, 100 runs per problem) makes
