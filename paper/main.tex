@@ -1,0 +1,83 @@
+% Working title and structure. Numbers come from docs/claims.md and docs/findings/ (section numbers in comments).
+% Build: see README.md (acmart.cls is generated from template/acmart.ins; no TeX installation was available when this was written).
+\documentclass[sigconf,nonacm]{acmart}
+
+\settopmatter{printacmref=false}
+\renewcommand\footnotetextcopyrightpermission[1]{}
+\pagestyle{plain}
+
+\begin{document}
+
+\title{Beam Search over an Imperative AST for Program Synthesis Without Learning: What Generic Pieces Buy, and What They Do Not}
+
+\author{Alexandre Felipe Muller de Souza}
+\affiliation{\institution{(affiliation)}\country{Brazil}}
+\email{alexandrefelipemuller@gmail.com}
+
+\begin{abstract}
+% 150--200 words. Fill last. Content: (1) no ML, no LLM: beam search over a small imperative language with generators, exact solved-count selection;
+% (2) integer subset of PSB2: four of seven problems solved in 100/100 runs, two near 90\%, one at 14\% (section 139);
+% (3) the main finding, stated plainly: pieces designed after looking at failures lift those problems, but show no gain on 17 unseen problems (132--135);
+% (4) one cheap generic form (count-mod) closes a family from 0/80 to 63/80 at no measured cost on a 77-problem suite (138).
+\end{abstract}
+
+\keywords{program synthesis, beam search, genetic programming, PSB2, benchmark, negative results}
+
+\maketitle
+
+\section{Introduction}
+% Problem; why a non-learned baseline matters (PushGP, enumeration, lexicase); contributions as a short list.
+% Contributions (only those the evidence supports, see docs/claims.md):
+%  - a search over a small AST with matched-seed A/B methodology, predictions registered before runs;
+%  - results on the integer subset of PSB2 with 100 seeds, including the failures;
+%  - a transfer study: designed pieces do not transfer (17 problems), one narrow form does within its family.
+
+\section{Related Work}
+% PushGP and lexicase selection (Spector, Helmuth); PSB1/PSB2; enumerative and SyGuS-style synthesis; learned and LLM-based synthesis (mention only as a contrast, no peers);
+% see docs/literature.md for the working notes.
+
+\section{The Search}
+\subsection{Language and Interpreter}
+% Mini-C: int variables, arr, aux, swap, while, if, call(lo,hi); step limit.
+\subsection{Beam Search and Selection}
+% Exact solved count, candidate pool of mutated / fresh / skeleton-seeded programs, level-by-level promotion, final re-verification.
+\subsection{Generic Pieces}
+% Combinator algebra, scalar-loop piece, tail enumeration, local-condition mutation; the six pieces of sections 127--131; count-mod (138).
+\subsection{Hand-written Skeletons}
+% Which remain (selectionsort, heapsort, binarysearch, mergesort, TSP) and why they do not matter on these problems (FINDINGS.md).
+
+\section{Experimental Protocol}
+% PSB2 protocol (200 training cases, 2,000 unseen, 900 s, 60M executions, success = all cases);
+% matched seeds; registered predictions; the no-drop-of-2 rule for promoting defaults; 77-problem regression battery and its noise (about +-3).
+% Encodings for problems outside the integer subset (mine, not official) and the PSB1-style generators (mine).
+
+\section{Results}
+\subsection{PSB2 Integer Subset}
+% Table: section 139 (100 seeds). Intervals (Wilson). Solve-time tail (median 250 s, p90 747 s): budget sensitivity, section 140.
+\subsection{Ablation of the Pieces}
+% 34/210 -> 178/210 at 30 seeds (126, 131); battery cost (755 vs 759); high-P cost on elements\_twice.
+\subsection{Transfer to Unseen Problems}
+% Sections 132--135: no gain beyond noise on 17 problems; degenerate and unreachable problems; honest negative.
+\subsection{A Narrow Piece That Does Transfer Within Its Family}
+% Sections 136--138: count-term failed, count-mod worked (0/80 -> 63/80, control 0/20); battery 758 vs 755.
+\subsection{Failure Analysis}
+% Section 140: long solve-time tail; 8/10 luhn failures solve at 1800 s; parity-term attractor in fuel\_cost (E1).
+
+\section{Discussion and Limitations}
+% Designed after looking at the seven problems (fitting to the evaluation set); 7 of 25 PSB2 problems; one configuration, no tuned comparison arm;
+% gcd contaminated; own generators for PSB1-style; budget is a choice (900 s).
+
+\section{Conclusion}
+
+\begin{acks}
+% Tools used: see docs; AI assistance (Claude Code) for implementation and analysis -- state according to the target venue's policy.
+\end{acks}
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{refs}
+
+\appendix
+\section{Reproducibility}
+% Commands, seeds, data layout (data/ is not committed), scripts/run_psb2.sh, section numbers of docs/findings/.
+
+\end{document}
