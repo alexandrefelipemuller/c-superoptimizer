@@ -11,7 +11,12 @@
 \title{Beam Search over an Imperative AST for Program Synthesis Without Learning: What Generic Pieces Buy, and What They Do Not}
 
 \author{Alexandre Felipe Muller de Souza}
-\affiliation{\institution{(affiliation)}\city{(city)}\country{Brazil}}
+\affiliation{%
+  \position{M.Sc.}
+  \institution{Independent Researcher}
+  \city{Curitiba}
+  \state{PR}
+  \country{Brazil}}
 \email{alexandrefelipemuller@gmail.com}
 
 \begin{abstract}
@@ -26,17 +31,103 @@
 \maketitle
 
 \section{Introduction}
-% Problem; why a non-learned baseline matters (PushGP, enumeration, lexicase); contributions as a short list.
-% Contributions (only those the evidence supports, see docs/claims.md):
-%  - a search over a small AST with matched-seed A/B methodology, predictions registered before runs;
-%  - results on the integer subset of PSB2 with 100 seeds, including the failures;
-%  - a transfer study: designed pieces do not transfer (17 problems), one narrow form does within its family.
+
+Program synthesis from input--output examples asks for a program, not a function approximation: the result can be read, tested
+outside the examples, and reasoned about. The field has two long-standing non-neural lines, genetic programming (GP) and
+enumerative or constraint-based synthesis, and, more recently, large neural models that write code directly. The first two have a
+shared yardstick in the General Program Synthesis Benchmark Suite and its successor PSB2~\cite{helmuth2015psb1,helmuth2021psb2},
+whose protocol (200 training cases, 2,000 unseen test cases, a budget of 60 million program executions, 100 runs per problem) makes
+success rates comparable across methods. The published baseline there is PushGP with lexicase selection, which solves 13 of the 25
+PSB2 problems at least once and several of the easiest ones only in a minority of runs~\cite{helmuth2021psb2}.
+
+This paper reports a program-synthesis system built to see how far a search with \emph{no learning} can go on that yardstick, and,
+as importantly, how much of what it achieves is due to the search itself and how much to pieces that its author designed after
+looking at where it failed. The system is a beam search over a small imperative language (integer variables, an array, loops,
+conditionals, swaps, bounded recursion) in which candidate programs come from a mix of mutation, fresh generation and a small
+set of generic generators (a ``combinator'' of loop shapes and relations, a scalar-loop generator, enumeration of short tails),
+with selection by the exact number of solved cases. There is no neural model, no learned prior and no language model.
+
+We emphasise method as much as numbers. Every comparison is run with matched random seeds. Predictions are written down before
+the runs and failed predictions are kept in the record. A change becomes a default only if it passes a regression battery of 77
+suite problems with a no-drop-of-two rule. The full log (140 numbered sections) is part of the artefact.
+
+\paragraph{Contributions.}
+\begin{itemize}
+  \item On the integer subset of PSB2 (seven of the 25 problems) and with 100 fresh seeds, the system solves four problems in all
+        100 runs, two (Fuel Cost, Luhn) in about 90, and one (Coin Sums) in 14. Under the same protocol the published PushGP baseline
+        solves the same seven problems in 8, 50, 1, 4, 0, 8 and 2 of 100 runs (Section~\ref{sec:psb2}). The budget matters: eight of
+        ten failed Luhn runs succeed when given twice the time.
+  \item An ablation showing where the gain comes from: six generic pieces, each cheap and each tested for cost on the 77-problem suite,
+        lift the seven problems from 34 to 178 solved runs out of 210 (30 seeds).
+  \item A \emph{negative} transfer result that we regard as the main finding: the pieces were designed on those seven problems, and
+        on 17 problems they were not designed for (PSB2 and PSB1-style) they show no gain beyond noise. One narrow, generic form
+        (counting items by a remainder test) does close its own family, from 0 to 63 of 80 runs, at no measured cost
+        (Section~\ref{sec:transfer}).
+  \item A documented protocol and the data behind every claim, including the claims that did not survive (for instance, ``six of
+        seven problems above 93\%'' was true at 30 seeds and false at 100).
+\end{itemize}
+
+\paragraph{Scope.}
+Only seven of the 25 PSB2 problems are expressible in our language, the integer and vector-of-integer ones; the rest need floating
+point or free-form strings. We do not claim to cover PSB2, and on problems that need an encoding outside that subset the system is
+not competitive (for example, Middle Character is solved by PushGP in 57 of 100 runs and by our system in at most 2 of 20 with our
+own encoding). Section~\ref{sec:discussion} lists the limitations.
+
+The rest of the paper is organised as follows. Section~\ref{sec:related} places the work among GP, enumerative and learned
+synthesis. Section~\ref{sec:search} describes the search, Section~\ref{sec:protocol} the protocol, Section~\ref{sec:results} the results,
+and Section~\ref{sec:discussion} the limitations.
 
 \section{Related Work}
-% PushGP and lexicase selection (Spector, Helmuth); PSB1/PSB2; enumerative and SyGuS-style synthesis; learned and LLM-based synthesis (mention only as a contrast, no peers);
-% see docs/literature.md for the working notes.
+\label{sec:related}
+
+\paragraph{Genetic programming and benchmark suites.}
+Push is a stack-based language designed so that evolved programs are always syntactically valid, and PushGP evolves such programs
+with a population-based search~\cite{spector2002push}. The General Program Synthesis Benchmark Suite (PSB1) collected 29 problems from
+introductory programming sources and gave PushGP results as a reference~\cite{helmuth2015psb1}; PSB2 added 25 harder problems taken
+from programming katas and courses, again with a PushGP baseline~\cite{helmuth2021psb2}. Our experiments use the PSB2 protocol and its
+data files for the integer subset, and the published PushGP rates as the reference point. We differ in kind, not only in
+details: our programs are written in an imperative language with explicit loops and the search is a beam search over generated
+candidates, not an evolving population.
+
+\paragraph{Selection, generalisation and novelty.}
+Lexicase selection, which filters the population case by case in random order, is the standard parent-selection method for PushGP
+on these suites~\cite{helmuth2015lexicase}. It also has known weaknesses: on problems with few distinct outputs, such as Boolean ones,
+it overfits the training cases, and generalisation improves when the run continues after the first program that fits the training
+set and the smallest such program is chosen~\cite{sobania2021generalizability}. Our protocol keeps a post-solution window and an
+independent adversarial check for the same reason. Combining lexicase selection with novelty search was studied by Jundt and
+Helmuth~\cite{jundt2019novelty}, who found novelty alone to be of limited use for program synthesis; a behaviour-profile novelty term in our
+system gave the same kind of result.
+
+\paragraph{Search for efficient algorithms and recursion.}
+GP has been used to evolve list-search algorithms, including logarithmic-time search, by Wolfson and Sipper, who generalise the representation
+with automatically defined functions so that the result is not biased towards binary search~\cite{wolfson2010efficient}. This is prior art for
+our own experiments on searching for sub-linear algorithms (not reported here), which we do not present as novel.
+
+\paragraph{Enumerative, syntax-guided and sketch-based synthesis.}
+Syntax-guided synthesis casts the problem as finding an expression, from a grammar, that meets a specification~\cite{alur2013sygus}, and
+enumerative solvers explore that grammar bottom-up, often with equivalence pruning~\cite{gulwani2017program}. Recursive programs can be
+synthesised from examples by an enumerative method as well~\cite{albarghouthi2013escher}. These systems mostly work on loop-free
+expressions or on a specification given as a formula, while ours searches imperative programs with loops from examples only. Our
+short-tail enumeration is a small instance of the same idea: after a block of generated code, the remaining few statements are enumerated.
+Stochastic superoptimisation searches over instruction sequences with a cost function~\cite{schkufza2013stoke}; our selection uses
+solved-case counts, not a cost model.
+
+\paragraph{Library learning and learned guidance.}
+DreamCoder and Stitch learn a library of reusable functions from solved tasks and use it to guide search~\cite{ellis2020dreamcoder,bowers2023stitch}.
+Our generic pieces play a similar role, a vocabulary of useful loop shapes, but they are \emph{designed by hand}, not learned, which is both the
+reason they transfer poorly to unseen problems and the reason their effect can be isolated and measured.
+
+\paragraph{Language-model-based synthesis.}
+Language models trained on code solve many programming problems directly~\cite{chen2021codex}. We do not compare with them: the goal here is a
+non-neural baseline with an inspectable search, and the comparison that matters for the claims in this paper is against GP on the same protocol.
+
+\paragraph{Position.}
+Our system is not new as a search method; its relation to the above is that it applies a different, imperative-program beam search to a
+shared benchmark, reports the failures and negative transfer alongside the successes, and publishes the whole log. The closest results are the
+published PushGP rates on PSB2~\cite{helmuth2021psb2}.
 
 \section{The Search}
+\label{sec:search}
 \subsection{Language and Interpreter}
 % Mini-C: int variables, arr, aux, swap, while, if, call(lo,hi); step limit.
 \subsection{Beam Search and Selection}
@@ -47,16 +138,20 @@
 % Which remain (selectionsort, heapsort, binarysearch, mergesort, TSP) and why they do not matter on these problems (FINDINGS.md).
 
 \section{Experimental Protocol}
+\label{sec:protocol}
 % PSB2 protocol (200 training cases, 2,000 unseen, 900 s, 60M executions, success = all cases);
 % matched seeds; registered predictions; the no-drop-of-2 rule for promoting defaults; 77-problem regression battery and its noise (about +-3).
 % Encodings for problems outside the integer subset (mine, not official) and the PSB1-style generators (mine).
 
 \section{Results}
+\label{sec:results}
 \subsection{PSB2 Integer Subset}
+\label{sec:psb2}
 % Table: section 139 (100 seeds). Intervals (Wilson). Solve-time tail (median 250 s, p90 747 s): budget sensitivity, section 140.
 \subsection{Ablation of the Pieces}
 % 34/210 -> 178/210 at 30 seeds (126, 131); battery cost (755 vs 759); high-P cost on elements\_twice.
 \subsection{Transfer to Unseen Problems}
+\label{sec:transfer}
 % Sections 132--135: no gain beyond noise on 17 problems; degenerate and unreachable problems; honest negative.
 \subsection{A Narrow Piece That Does Transfer Within Its Family}
 % Sections 136--138: count-term failed, count-mod worked (0/80 -> 63/80, control 0/20); battery 758 vs 755.
@@ -64,6 +159,7 @@
 % Section 140: long solve-time tail; 8/10 luhn failures solve at 1800 s; parity-term attractor in fuel\_cost (E1).
 
 \section{Discussion and Limitations}
+\label{sec:discussion}
 % Designed after looking at the seven problems (fitting to the evaluation set); 7 of 25 PSB2 problems; one configuration, no tuned comparison arm;
 % gcd contaminated; own generators for PSB1-style; budget is a choice (900 s).
 
