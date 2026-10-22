@@ -129,14 +129,53 @@ published PushGP rates on PSB2~\cite{helmuth2021psb2}.
 
 \section{The Search}
 \label{sec:search}
+
 \subsection{Language and Interpreter}
-% Mini-C: int variables, arr, aux, swap, while, if, call(lo,hi); step limit.
+Programs are written in a small imperative language, Mini-C: integer scalar variables (one of them, \texttt{v0}, holds the length of
+the input), one input array \texttt{arr} that also receives the output, a scratch array \texttt{aux}, \texttt{if}, \texttt{while},
+\texttt{break}, \texttt{swap}, a bounded recursive call over an interval, comparison, arithmetic (\texttt{+ - * / \%}) and bitwise operators.
+A tree-walking interpreter runs a candidate on an input and returns the final array; a step limit turns a non-terminating loop into a
+timeout. Programs are abstract syntax trees, so the search can grow, mutate and recombine them without a syntactic validity problem.
+
 \subsection{Beam Search and Selection}
-% Exact solved count, candidate pool of mutated / fresh / skeleton-seeded programs, level-by-level promotion, final re-verification.
-\subsection{Generic Pieces}
-% Combinator algebra, scalar-loop piece, tail enumeration, local-condition mutation; the six pieces of sections 127--131; count-mod (138).
+A problem supplies instances at a difficulty level and a predicate that decides whether an output is correct. The search keeps the
+\texttt{beamWidth} best programs at the current size and builds the next generation from three sources: mutations of the beam,
+freshly generated programs, and programs seeded from a small library of skeletons (Section~\ref{sec:skeletons}). Candidates are ranked by the
+number of training cases solved exactly, with a partial score as a tie-break. A program that solves every case becomes a
+solution; unless the run is a single-level benchmark run (as in PSB2), it must keep solving further levels of larger instances before it is
+confirmed. Two further guards reduce false positives: a regression guard adds the first instances of every earlier level to the scoring set,
+and a confirmation step reruns the champion on fresh seeds. Solutions are finally checked outside the search on held-out sizes, adversarial
+inputs and exhaustive small inputs.
+
+\subsection{Generic Generators}
+Most candidates come from a grammar-based generator augmented with a small set of \emph{generic block generators}. Each draws every part of a
+block independently, so that a named algorithm (a sum, a maximum, factorial, a gcd, a primality test) is reachable only as one draw among many and
+is not written down anywhere:
+\begin{itemize}
+  \item the \emph{combinator}, a product of catalogued axes: the layout of the input (whole array, key-prefixed, length-prefixed, a pair of sequences),
+        the loop shape (single, nested, triangular, converging, adjacent pairs) and the relation computed in the innermost statement (sum, best,
+        count-if, exists, for-all, xor, swap-if, and stateful ones: Kadane-style scans, prefix and suffix combinations, longest increasing subsequence, frequency tables);
+  \item a \emph{scalar-loop} generator for inputs that are numbers rather than vectors (counting loops over a bound, pair updates until zero);
+  \item enumeration of the short tail that follows a generated block, and a mutation that rewrites a single condition in place.
+\end{itemize}
+Section~\ref{sec:results} concerns seven further pieces added to this set during the work reported here. Each is a probability of replacing one
+choice inside a block, and a probability of zero removes it without drawing a random number, so the old grammar is recovered exactly:
+\begin{itemize}
+  \item \emph{term expression}: the loop-sum term \texttt{arr[i]} becomes a short arithmetic expression of it (\texttt{x/c}, \texttt{x\%c}, \texttt{x*c}, \texttt{x$\pm$c}, \texttt{x/c$_1\pm$c$_2$}, \texttt{x*c$_1\pm$c$_2$}),
+  \item \emph{prefix crossing}: the first index at which a running sum crosses a threshold,
+  \item \emph{pair find}: the first pair of elements whose sum or difference reaches a target, with two outputs,
+  \item \emph{parity term}: a term that depends on the parity of the index, with an optional fold of values above a constant,
+  \item \emph{sum-if}: a conditional sum, \texttt{if (a CMP rhs) acc += a},
+  \item \emph{radix}: a mixed-radix decomposition of a number with one to three small divisors,
+  \item \emph{count-mod}: a count of the elements whose remainder by a small constant is, or is not, zero.
+\end{itemize}
+The first six were designed after observing where the search failed on the integer subset of PSB2; the last after a failure on a counting problem (Section~\ref{sec:narrow}).
+
 \subsection{Hand-written Skeletons}
-% Which remain (selectionsort, heapsort, binarysearch, mergesort, TSP) and why they do not matter on these problems (FINDINGS.md).
+\label{sec:skeletons}
+A small library of whole-algorithm skeletons (selection sort, heap sort, binary search, merge sort and two travelling-salesman searches) remains
+available to seed candidates. Earlier ablations in the project log found them indispensable only for the sorting and search problems of our own suite. We did not run a
+skeleton ablation on the PSB2 problems; the solved programs we read for them are plain loops of the kind the generic generators produce.
 
 \section{Experimental Protocol}
 \label{sec:protocol}
@@ -213,22 +252,151 @@ limit, a run's depth at a given time depends on machine load, so rates near the 
   \label{fig:time}
 \end{figure*}
 \subsection{Ablation of the Pieces}
-% 34/210 -> 178/210 at 30 seeds (126, 131); battery cost (755 vs 759); high-P cost on elements\_twice.
+\label{sec:ablation}
+Table~\ref{tab:ablation} gives the effect of the six pieces designed on the integer subset, with 30 seeds per problem (seeds 70000--70029, 900\,s).
+With none of them, the search solves GCD in every run, Paired Digits in 4 runs and nothing else: 34 of 210. With all six at their final
+probabilities it solves 178 of 210. The increase came in steps that the log records. Term expression alone brought Fuel Cost to 29 of 30; prefix crossing alone
+brought Basement to 30 of 30; the parity term and pair find, at a high probability (0.1 and 0.2), brought Find Pair to 30 and Luhn to 29, for a
+total of 119, and sum-if and radix added Paired Digits.
+
+\begin{table}[t]
+  \caption{Solved runs of 30, integer subset of PSB2, seeds 70000--70029, 900\,s: no piece against the six pieces at their final probabilities.}
+  \label{tab:ablation}
+  \begin{tabular}{lrr}
+    \toprule
+    Problem & No pieces & Six pieces \\
+    \midrule
+    GCD & 30 & 30 \\
+    Fuel Cost & 0 & 28 \\
+    Basement & 0 & 30 \\
+    Find Pair & 0 & 30 \\
+    Luhn & 0 & 28 \\
+    Paired Digits & 4 & 30 \\
+    Coin Sums & 0 & 2 \\
+    \midrule
+    Total & 34 & 178 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Cost on the rest of the suite.}
+A piece that helps the seven problems is only acceptable if it does not hurt the others, so each change was run through the
+77-problem regression battery of Section~\ref{sec:protocol}. Term expression and prefix crossing together solved 755 of 770 problem--seed
+pairs, the same count as the base. The parity term and pair find at a high probability also gave 755 against 755, but
+Elements Twice fell from 10 to 8 of 10 seeds, which breaks the rule. A 30-seed repeat gave 29 of 30 at the base, 24 of 30 at the high probability ($p \approx 0.09$)
+and 29 of 30 at a low probability, so the probabilities were reduced (parity term 0.03, pair find 0.05, sum-if 0.05, radix 0.03) and the four were
+rerun together: 759 against 755 with no drop above one. We do not read the difference of four as a gain, because repeating the base gives a
+count that varies by about three. The low probabilities still produced the 178 of Table~\ref{tab:ablation}; the high ones had cost a problem.
+
 \subsection{Transfer to Unseen Problems}
 \label{sec:transfer}
-% Sections 132--135: no gain beyond noise on 17 problems; degenerate and unreachable problems; honest negative.
+The pieces were designed while looking at the failures on seven problems, so their effect on those problems may be fitting to the evaluation set. We
+tested them on problems that none of them had been designed for, choosing the problems before running either arm, with the same
+binary run with the six pieces on (the defaults) and off (all at zero), seeds matched (Section~\ref{sec:protocol}). Table~\ref{tab:transfer} gives the
+result for 17 problems in three groups: seven further PSB2 problems with our own encodings, and the ten PSB1-style problems at
+two sizes (the second, medium size is a re-run of the first with smaller ranges).
+
+\begin{table}[t]
+  \caption{Pieces off / on, solved runs. PSB2 groups: 30 and 20 seeds, 900 and 600\,s. PSB1-style: 20 seeds, 300\,s (full) and 600\,s (medium).}
+  \label{tab:transfer}
+  \begin{tabular}{lrr}
+    \toprule
+    Group (problems) & Off & On \\
+    \midrule
+    PSB2 (Cut Vector$^\dagger$, Fizz Buzz, Mastermind), /90 & 30 & 30 \\
+    PSB2 (Middle Char., Twitter, Solve Bool., Leaders), /80 & 0 & 2 \\
+    PSB1-style, full ranges (10 problems), /200 & 40 & 40 \\
+    PSB1-style, medium ranges (10 problems), /200 & 65 & 62 \\
+    \bottomrule
+  \end{tabular}\\[2pt]
+  {\footnotesize $^\dagger$ degenerate in the dataset: the output is always of length one, so the constant program solves it.}
+\end{table}
+
+In no group is there a difference larger than noise. The largest per-problem difference is 2 runs (Middle Character 2 against 0 of 20, $p \approx 0.24$;
+Negative-to-Zero 8 against 10 of 20). Several problems were out of reach for both arms: eight of the ten PSB1-style problems at full
+size stayed at zero, which is why we added the medium size, a choice made after seeing that result and not from any difference between the arms, and still six of the
+ten stayed at zero. Two of the PSB1-style problems at full size (Grade and Mirror Image) were solved in every run by both arms,
+as was the degenerate Cut Vector. We conclude that, for these 17 problems, the pieces neither help nor hurt measurably, and that
+their effect is confined to the problems they were designed on.
+
 \subsection{A Narrow Piece That Does Transfer Within Its Family}
-% Sections 136--138: count-term failed, count-mod worked (0/80 -> 63/80, control 0/20); battery 758 vs 755.
+\label{sec:narrow}
+Two problems of the medium PSB1-style set, Count Odds and Sum of Squares, were at zero in both arms. Hand-written programs of about fifteen
+statements solved both, so they are expressible. Reading the generator showed two gaps: the combinator's count-if tests the element against a key
+and never applies a remainder to it, and the scalar-loop generator has a loop bound of $i^2$ but no term $i^2$ in the body. We closed each with an option.
+The first was a wide one: the test drawn from the whole set of arithmetic terms. It reached Count Odds in 1 of 10 runs at probability 0.3, did not reach a sibling problem (Count Multiples of Three, 0 of 20 in both arms) at the registered
+probability of 0.1, and, together with the other option, cost one problem of the battery two seeds (Majority Value, 5 to 3 of 10), so it was not adopted.
+The narrow option, \emph{count-mod}, tests only \texttt{arr[i] \% c} against zero with $c$ drawn from 2 to 9. At probability 0.1 and with matched seeds,
+it raised Count Odds, Count Multiples of Three and Count Evens from 0 of 20 to 18 of 20, and Count Not Multiple of Four to 9 of 20 (Table~\ref{tab:mod}).
+A control that the form cannot express (\texttt{x \% 5 == 2}) stayed at 0 of 20. The regression battery gave 758 against 755 with no drop
+above one, and the option is now a default. The scalar-loop option reached Sum of Squares in 10 of 10 runs and was left optional.
+
+\begin{table}[t]
+  \caption{Count-mod at probability 0.1, solved runs of 20 (seeds 76000--76019, 300\,s).}
+  \label{tab:mod}
+  \begin{tabular}{lrr}
+    \toprule
+    Problem & Default & Count-mod \\
+    \midrule
+    Count Odds & 0 & 18 \\
+    Count Multiples of Three & 0 & 18 \\
+    Count Evens & 0 & 18 \\
+    Count Not Multiple of Four & 0 & 9 \\
+    Count Mod Five Is Two (control) & 0 & 0 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+This is a within-family result and not a generalisation result: all four solved problems are one family, two of them motivated the piece, and we
+wrote the siblings. What it supports is narrower, and we think it is the useful lesson of the experiment: a one-form generator closed a family that a
+generator drawing from several dozen forms did not, so that the size of the space from which a piece draws mattered more than the idea behind it.
+
 \subsection{Failure Analysis}
 \label{sec:failures}
 % Section 140: long solve-time tail; 8/10 luhn failures solve at 1800 s; parity-term attractor in fuel\_cost (E1).
 
 \section{Discussion and Limitations}
 \label{sec:discussion}
-% Designed after looking at the seven problems (fitting to the evaluation set); 7 of 25 PSB2 problems; one configuration, no tuned comparison arm;
-% gcd contaminated; own generators for PSB1-style; budget is a choice (900 s).
+
+\paragraph{What the evidence supports.}
+On the integer subset of PSB2 and under the PSB2 protocol, a search with no learning solves four of seven problems in every one of 100 runs, two in about 90 and one
+in 14, rates above the published PushGP baseline on all seven (Section~\ref{sec:psb2}). Six generic pieces account for the difference from our own
+baseline without a measured cost on 77 other problems (Section~\ref{sec:ablation}). A single narrow piece closes a family of counting problems that the previous
+grammar did not reach (Section~\ref{sec:narrow}).
+
+\paragraph{What it does not support.}
+The central caveat is that the six pieces that lift the PSB2 results were designed after observing where the search failed on \emph{those} problems. Their effect on
+them is therefore not a held-out result. The transfer experiments of Section~\ref{sec:transfer} were designed to test that, and found no effect on 17 other problems, with some
+degenerate or out of reach for both arms. We read this as a limit on the claim, not as a failure of the pieces: a piece can be useful
+exactly on the structure it was built for, and that is also what the count-mod result shows. But it means that the PSB2 numbers describe this system
+with its pieces tuned to these seven problems and must not be read as the expected performance on a new problem.
+
+\paragraph{Coverage of the benchmark.}
+Only seven of the 25 PSB2 problems are expressible without floating point or free-form strings. On problems outside that subset, where we built our own encodings, PushGP
+solves more than we do (Middle Character 57 of 100 against at most 2 of 20 for us, Fizz Buzz 25 against 0 of 30). The comparison in the first paragraph is thus a
+comparison on the subset of the benchmark that suits this language, and we make no claim about the benchmark as a whole.
+
+\paragraph{Comparison with the published baseline.}
+The PushGP figures are those of one untuned configuration reported with the benchmark. Our figures use a wall-clock limit as well as the cap on program
+executions, our own tuning of generic pieces, and a single configuration with no tuned comparison arm. A fair comparison would run a tuned PushGP, or another
+non-neural system, at the same budget on the same seeds, which we did not do. GCD is also a problem that the search was built to solve from its earliest versions, so it is not independent evidence.
+
+\paragraph{Budget and reproducibility.}
+The success rates of Fuel Cost and Luhn depend on the time limit: their curves are still rising at 900\,s and a rerun of failed Luhn seeds at twice the time solved most of them. Because the limit is on wall-clock time, results
+carry timing noise that depends on machine load, and are not reproducible to the second. The cap on program executions is deterministic and a stricter
+reproduction would use only it. The results come from one machine.
+
+\paragraph{Our own problem sets.}
+Three groups of problems are ours: lossless encodings of PSB2 problems that are not in the official format, PSB1-style problems generated by our own code with ranges chosen by us (and
+changed once after seeing the first result, which is a forking path that we report), and families of siblings written to test a piece. These are useful for
+testing mechanisms but are not external benchmarks.
+
+\paragraph{Process.}
+The work was done with an AI coding assistant, which wrote much of the code and the analysis scripts; design decisions, the predictions and the reading of results were reviewed by the
+author. We state this because it affects how the process, and not the numbers, should be assessed, and the full log is available for that.
 
 \section{Conclusion}
+% Write last: restate the supported claim, the transfer limit, and the next steps (100 more seeds with a tuned baseline, more PSB2 problems with strings and floats, an independent held-out set).
 
 \begin{acks}
 % Tools used: see docs; AI assistance (Claude Code) for implementation and analysis -- state according to the target venue's policy.
