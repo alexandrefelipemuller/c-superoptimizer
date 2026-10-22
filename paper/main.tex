@@ -98,9 +98,9 @@ candidates, not an evolving population.
 
 \paragraph{Selection, generalisation and novelty.}
 Lexicase selection, which filters the population case by case in random order, is the standard parent-selection method for PushGP
-on these suites~\cite{helmuth2015lexicase}. It also has known weaknesses: on problems with few distinct outputs, such as Boolean ones,
-it overfits the training cases, and generalisation improves when the run continues after the first program that fits the training
-set and the smallest such program is chosen~\cite{sobania2021generalizability}. Our protocol keeps a post-solution window and an
+on these suites~\cite{helmuth2015lexicase,helmuth2021psb2}. It also has known weaknesses: on problems with few distinct outputs, such as Boolean ones,
+it overfits the training cases, and generalisation can improve when the run continues after the first program that fits the training
+set~\cite{sobania2021generalizability}. Our protocol keeps a post-solution window and an
 independent adversarial check for the same reason. Combining lexicase selection with novelty search was studied by Jundt and
 Helmuth~\cite{jundt2019novelty}, who found novelty alone to be of limited use for program synthesis; a behaviour-profile novelty term in our
 system gave the same kind of result.
