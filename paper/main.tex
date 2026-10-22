@@ -21,10 +21,14 @@
 \email{alexandrefelipemuller@gmail.com}
 
 \begin{abstract}
-% 150--200 words. Fill last. Content: (1) no ML, no LLM: beam search over a small imperative language with generators, exact solved-count selection;
-% (2) integer subset of PSB2: four of seven problems solved in 100/100 runs, two near 90\%, one at 14\% (section 139);
-% (3) the main finding, stated plainly: pieces designed after looking at failures lift those problems, but show no gain on 17 unseen problems (132--135);
-% (4) one cheap generic form (count-mod) closes a family from 0/80 to 63/80 at no measured cost on a 77-problem suite (138).
+We study a program-synthesis search with no machine learning and no language model: a beam search over the syntax trees of a small
+imperative language, driven by generators of loop and conditional shapes and by an exact count of solved training cases. On the seven integer
+problems of the PSB2 benchmark, with 100 fresh seeds, a 900\,s budget and 2,000 unseen test cases per run, it solves GCD, Basement, Find Pair and
+Paired Digits in every run, Fuel Cost and Luhn in 91 and 90 runs, and Coin Sums in 14, higher on all seven than the published PushGP with lexicase
+selection (an untuned comparison). Doubling the budget raises Fuel Cost to 94 and Luhn to 98. The gain comes from generator pieces that
+were designed after reading the failures on these same problems, and we report plainly that they show no gain on 17 further problems we tried
+(PSB2-style and PSB1-style), and no harm either. One cheap and generic piece, a counting test on residues, does transfer within its family,
+raising four related problems from 0 of 80 to 63 of 80 runs. Predictions were registered before runs, and those that failed are reported.
 \end{abstract}
 
 \keywords{program synthesis, beam search, genetic programming, PSB2, benchmark, negative results}
@@ -241,14 +245,14 @@ solved at the time its search ends with all 2,000 unseen cases passed; unsolved 
 are solved in all runs, with medians of 4 s (Find Pair), 4 s (Basement), 6 s (GCD) and 39 s (Paired Digits). Fuel Cost and Luhn are solved in 91
 and 90 runs with medians of 250 s and 274 s, and their curves are still rising at the budget: a tenth of the runs end in the last quarter of it.
 Coin Sums reaches 14 runs and is nearly flat after 400 s. The rates for Fuel Cost and Luhn are therefore statements about a 900\,s budget on
-our machine; rerunning ten failed Luhn seeds with 1800\,s solved eight of them (Section~\ref{sec:failures}). Because the budget is a wall-clock
+our machine; rerunning both problems with 1800\,s and a doubled execution cap raises them to 94 and 98 (Section~\ref{sec:failures}). Because the budget is a wall-clock
 limit, a run's depth at a given time depends on machine load, so rates near the end of the curve carry timing noise in addition to sampling noise.
 
 \begin{figure*}[t]
   \centering
   \includegraphics[width=0.85\textwidth]{figures/success_vs_time}
   \caption{Fraction of runs solved against time, 100 runs per problem (seeds 80000--80099), integer subset of PSB2. (a) The four problems
-  solved in every run, log time axis. (b) The three that use the budget. Counts in the legends are solved runs out of 100.}
+  solved in every run, log time axis. (b) The three that use the budget; Fuel Cost and Luhn from the 1800\,s rerun, Coin Sums from the 900\,s run. Counts in the legends are solved runs out of 100.}
   \label{fig:time}
 \end{figure*}
 \subsection{Ablation of the Pieces}
@@ -353,7 +357,23 @@ generator drawing from several dozen forms did not, so that the size of the spac
 
 \subsection{Failure Analysis}
 \label{sec:failures}
-% Section 140: long solve-time tail; 8/10 luhn failures solve at 1800 s; parity-term attractor in fuel\_cost (E1).
+Two problems fall short of 100 of 100 at 900\,s: Fuel Cost (91) and Luhn (90). We asked how much of the gap is budget and how much is the
+search missing something, with the predictions registered before each run.
+
+\paragraph{Budget.} We reran both problems on the same 100 seeds with a wall budget of 1800\,s and an execution cap of 120 million (twice the PSB2
+cap, so the wall clock stays the binding limit). We predicted at least 96 solved for Fuel Cost and 95 for Luhn. Luhn reached 98 and met the
+prediction; Fuel Cost reached 94 and missed it. Inside the first 900\,s the rerun solved 90 and 91 runs, against 91 and 90 originally, so
+the timing noise of wall-limited runs is about one run. Eleven of the 19 runs that failed at 900\,s now solve (Fuel Cost 3 of 9, Luhn 8 of 10),
+and none that solved before failed. The missing tenth of Luhn was therefore almost entirely budget, and its remaining failures (two seeds)
+ran the full 1800\,s. The medians among solved runs are 264\,s (Fuel Cost) and 302\,s (Luhn), with a tail: 4 and 7 runs finish after 900\,s.
+This is a budget-sensitivity result outside the PSB2 protocol and is not comparable to published numbers.
+
+\paragraph{Fuel Cost is different.} Six Fuel Cost runs stopped between 544 and 1226\,s, before the wall budget, so they ended on the
+execution cap or by exhausting the search, and more wall time would not help them. We did not test a higher cap. A first diagnosis blamed a
+block of generated code for the Fuel Cost failures (\S\ref{sec:protocol}); the evidence did not support it. We then tested the opposite
+hypothesis, that the parity term was drawing the search into a local attractor: with the parity term disabled, Fuel Cost fell from 91 to 81 of
+100 (exact McNemar test on the paired seeds, $p=0.041$), against the prediction of at least 95. The parity term helps on Fuel Cost, so the
+attractor hypothesis is rejected, and what keeps the last runs from solving remains unexplained.
 
 \section{Discussion and Limitations}
 \label{sec:discussion}
@@ -396,7 +416,12 @@ The work was done with an AI coding assistant, which wrote much of the code and 
 author. We state this because it affects how the process, and not the numbers, should be assessed, and the full log is available for that.
 
 \section{Conclusion}
-% Write last: restate the supported claim, the transfer limit, and the next steps (100 more seeds with a tuned baseline, more PSB2 problems with strings and floats, an independent held-out set).
+A beam search over a small imperative language, with no learning, solves the seven integer problems of PSB2 at rates between 14 and 100 of 100
+runs, and four of them in every run. The supported claim is narrow: those rates, on those problems, under the PSB2 success criterion. The
+pieces that produced them were designed on the same problems, and on 17 unseen problems they neither helped nor hurt beyond noise; the one
+piece that transferred did so within a family of closely related problems. Failed predictions, including a wrong diagnosis of the Fuel
+Cost failures, are part of the record. The next steps are a tuned baseline arm on the same 100 seeds, PSB2 problems that need strings and
+floats (which the language cannot yet express), and an independent held-out problem set, chosen before the pieces are designed.
 
 \begin{acks}
 % Tools used: see docs; AI assistance (Claude Code) for implementation and analysis -- state according to the target venue's policy.
@@ -408,6 +433,17 @@ author. We state this because it affects how the process, and not the numbers, s
 \appendix
 \section{Reproducibility}
 \label{app:repro}
-% Commands, seeds, data layout (data/ is not committed), scripts/run_psb2.sh, section numbers of docs/findings/.
+The repository holds the code, the tests and a log of every experiment (\texttt{docs/findings/}, indexed by \texttt{INDEX.md}); this paper reflects
+sections 126--141 of that log, and the earlier sections cover the development of the system itself. The raw run output (\texttt{data/}) is
+program-generated and is not committed.
+
+\begin{itemize}
+  \item Main run (Section~\ref{sec:psb2}): \texttt{scripts/run\_psb2.sh} with seeds 80000--80099, a 900\,s wall budget and the defaults of the repository head
+  (log section 139).
+  \item 1800\,s rerun (Fuel Cost and Luhn): \texttt{PROBLEMS="psb2\_fuel\_cost psb2\_luhn" WALL=1800 MAXEXEC=120000000} (section 141).
+  \item Figure~\ref{fig:time}: \texttt{scripts/plot\_success\_vs\_time.py}, which also writes the per-run solve times to a CSV file.
+  \item Datasets: the official PSB2 files, downloaded unchanged; the PSB1-style generators are our own and are in \texttt{src/problems/}.
+  \item Tests: \texttt{make test} (254 tests).
+\end{itemize}
 
 \end{document}
