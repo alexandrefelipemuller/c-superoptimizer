@@ -260,3 +260,9 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 140r. luhn failures mostly budget (8/10 solve at 1800 s); parity-term 0 makes fuel_cost worse (81 vs 91, McNemar p=0.041): both predictions failed | 11_sections_121-125.md | 1114 |
 | 141. fuel_cost and luhn at 1800 s (budget sensitivity); predictions registered | 11_sections_121-125.md | 1134 |
 | 141r. 1800 s: fuel_cost 94, luhn 98 (fuel_cost prediction failed, other three met); six fuel_cost failures stop before the wall budget (cap) | 11_sections_121-125.md | 1148 |
+| 142. Paper phase 2: stop reasons from logs (fuel_cost failures exhausted the size limit, not the cap) and six-pieces-off ablation at 100 seeds registered | 11_sections_121-125.md | 1170 |
+| 142r. Six pieces off, 100 seeds: 113/700 vs 595/700 on, all seven predictions met | 11_sections_121-125.md | 1195 |
+| 143. Paper phase 2: random-search baseline (no beam feedback) registered | 11_sections_121-125.md | 1215 |
+| 143r. Random search with pieces on: 187/210 vs beam 183/210; six of seven random-on predictions failed; selection adds nothing measurable on PSB2 integer subset | 11_sections_121-125.md | 1230 |
+| 144. Paper phase 2: fuel_cost failures with a size limit of 300, registered | 11_sections_121-125.md | 1255 |
+| 144r. All six fuel_cost failures solve at size limit 300, needing 79-107M executions (above the 60M cap); prediction failed | 11_sections_121-125.md | 1262 |
