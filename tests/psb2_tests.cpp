@@ -177,3 +177,26 @@ TEST(psb2_section_133_problems_parse_and_match_their_references) {
     CHECK_EQ(flags[2], 1);
     CHECK_EQ(flags[3], 1);
 }
+
+TEST(psb2_section_145_heldout_problems_parse_and_match_their_references) {
+    using K = Psb2Problem::Kind;
+    std::vector<std::string> sq = {R"({"input1":12,"output1":"14"})", R"({"input1":99,"output1":"8181"})", R"({"input1":10,"output1":"10"})"};
+    Psb2Problem sp(K::SquareDigits, 7, 1, sq, sq, 3, 3);
+    CHECK_EQ(sp.mismatchesAgainstOfficial(), static_cast<size_t>(0));
+    CHECK_EQ(sp.generateInstances(1)[0].input.size(), static_cast<size_t>(15));
+    auto digits = Psb2Problem::reference(K::SquareDigits, {99});
+    CHECK_EQ(digits.size(), static_cast<size_t>(4));
+    CHECK_EQ(digits[0], 8);
+    CHECK_EQ(digits[3], 1);
+    std::vector<std::string> bw = {R"({"input1":"XXXXXXXXXXXX","output1":300})", R"({"input1":"--------------------","output1":0})",
+                                   R"({"input1":"5\/5\/5\/5\/5\/5\/5\/5\/5\/5\/5","output1":150})",
+                                   R"({"input1":"7115XXX548\/279-X53","output1":145})"};
+    CHECK_EQ(Psb2Problem(K::Bowling, 7, 1, bw, bw, 4, 4).mismatchesAgainstOfficial(), static_cast<size_t>(0));
+    std::vector<std::string> cc = {R"({"input1":"two-words","output1":"twoWords"})", R"({"input1":"two words","output1":"two words"})",
+                                   R"({"input1":"a-b-c","output1":"aBC"})", R"({"input1":"yk rg-kfiaw bajy","output1":"yk rgKfiaw bajy"})"};
+    CHECK_EQ(Psb2Problem(K::CamelCase, 7, 1, cc, cc, 4, 4).mismatchesAgainstOfficial(), static_cast<size_t>(0));
+    std::vector<std::string> md = {R"({"input1":3,"input2":1,"input3":2,"output1":2})", R"({"input1":-5,"input2":-5,"input3":7,"output1":-5})"};
+    Psb2Problem mp(K::Median, 7, 1, md, md, 2, 2);
+    CHECK_EQ(mp.mismatchesAgainstOfficial(), static_cast<size_t>(0));
+    CHECK_EQ(Psb2Problem::reference(K::Median, {1, 3, 2})[0], 2);
+}

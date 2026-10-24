@@ -86,6 +86,10 @@ std::string Psb2Problem::datasetName(Kind kind) {
         case Kind::MiddleChar: return "middle-character";
         case Kind::SolveBoolean: return "solve-boolean";
         case Kind::Leaders: return "leaders";
+        case Kind::SquareDigits: return "square-digits";
+        case Kind::Bowling: return "bowling";
+        case Kind::CamelCase: return "camel-case";
+        case Kind::Median: return "median-psb1";
     }
     return "";
 }
@@ -214,6 +218,54 @@ std::vector<int> Psb2Problem::reference(Kind kind, const std::vector<int>& arr) 
             }
             return flags;
         }
+        case Kind::SquareDigits: {
+            std::string digits = std::to_string(arr.empty() ? 0 : arr[0]), out;
+            for (char ch : digits) out += std::to_string((ch - '0') * (ch - '0'));
+            std::vector<int> cells;
+            for (char ch : out) cells.push_back(ch - '0');
+            return cells;
+        }
+        case Kind::Bowling: {
+            // Rolls from the codes: X = 10, / = what is left of the pin count, - = 0, a digit = itself.
+            std::vector<int> rolls;
+            for (size_t i = 0; i < arr.size(); ++i) {
+                int c = arr[i];
+                if (c == 'X') rolls.push_back(10);
+                else if (c == '/') rolls.push_back(10 - (rolls.empty() ? 0 : rolls.back()));
+                else if (c == '-') rolls.push_back(0);
+                else rolls.push_back(c);
+            }
+            int score = 0;
+            size_t r = 0;
+            auto at = [&](size_t k) { return k < rolls.size() ? rolls[k] : 0; };
+            for (int frame = 0; frame < 10 && r < rolls.size(); ++frame) {
+                if (rolls[r] == 10) {
+                    score += 10 + at(r + 1) + at(r + 2);
+                    r += 1;
+                } else if (at(r) + at(r + 1) == 10) {
+                    score += 10 + at(r + 2);
+                    r += 2;
+                } else {
+                    score += at(r) + at(r + 1);
+                    r += 2;
+                }
+            }
+            return {score};
+        }
+        case Kind::CamelCase: {
+            // The official rule: each "-x" becomes "X"; spaces and the other characters are kept.
+            std::vector<int> out;
+            for (size_t i = 0; i < arr.size(); ++i) {
+                if (arr[i] == '-' && i + 1 < arr.size()) out.push_back(std::toupper(arr[++i]));
+                else out.push_back(arr[i]);
+            }
+            return out;
+        }
+        case Kind::Median: {
+            if (arr.size() < 3) return {0};
+            int a = arr[0], b = arr[1], c2 = arr[2];
+            return {std::max(std::min(a, b), std::min(std::max(a, b), c2))};
+        }
         case Kind::PairedDigits: {
             int sum = 0;
             for (size_t i = 0; i + 1 < arr.size(); ++i) {
@@ -251,6 +303,14 @@ bool Psb2Problem::parseCase(const std::string& line, Instance& out) const {
         for (long v : *in2) arr.push_back(static_cast<int>(v));
     } else if (kind_ == Kind::FizzBuzz) {
         arr.assign(1, arr.empty() ? 0 : arr[0]);
+    } else if (kind_ == Kind::SquareDigits) {
+        arr.resize(15, 0);
+    } else if (kind_ == Kind::Median) {
+        const auto* in2 = get("input2");
+        const auto* in3 = get("input3");
+        if (!in2 || in2->empty() || !in3 || in3->empty()) return false;
+        arr.push_back(static_cast<int>((*in2)[0]));
+        arr.push_back(static_cast<int>((*in3)[0]));
     }
     std::vector<int> expected;
     if (kind_ == Kind::Twitter || kind_ == Kind::MiddleChar) {
@@ -269,6 +329,10 @@ bool Psb2Problem::parseCase(const std::string& line, Instance& out) const {
             }
             expected.push_back(static_cast<int>(value));
         }
+    } else if (kind_ == Kind::SquareDigits || kind_ == Kind::CamelCase) {
+        const auto* o1 = get("output1");
+        if (!o1 || o1->empty() || (kind_ == Kind::CamelCase && arr.empty())) return false;
+        for (long v : *o1) expected.push_back(static_cast<int>(v));
     } else if (kind_ == Kind::SolveBoolean) {
         if (arr.empty()) return false;
         expected.push_back(line.find("\"output1\":true") != std::string::npos ? 1 : 0);
@@ -300,7 +364,8 @@ bool Psb2Problem::parseCase(const std::string& line, Instance& out) const {
     }
     for (const char* key : {"output1", "output2", "output3", "output4"}) {
         if (kind_ == Kind::CutVector || kind_ == Kind::FizzBuzz || kind_ == Kind::Twitter ||
-            kind_ == Kind::MiddleChar || kind_ == Kind::SolveBoolean || kind_ == Kind::Leaders) {
+            kind_ == Kind::MiddleChar || kind_ == Kind::SolveBoolean || kind_ == Kind::Leaders ||
+            kind_ == Kind::SquareDigits || kind_ == Kind::CamelCase) {
             break;
         }
         const auto* o = get(key);

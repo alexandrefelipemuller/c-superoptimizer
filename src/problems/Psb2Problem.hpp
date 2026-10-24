@@ -32,11 +32,16 @@ namespace algosearch {
 //   solve_boolean: arr = the expression as ASCII, evaluated left to right; arr[0] = 1 if true, else 0.
 //   leaders: arr = the vector; arr[i] = 1 if arr[i] is a leader (at least everything to its right), else 0
 //     (the official output lists the leaders in order, so the flags carry the same information).
+//   Section 145 (held-out, frozen before they were implemented; none was used in any design or transfer test):
+//   square_digits: arr = {n, 0 x 14}; the leading cells of the output are the digits (as values) of the squares of the digits of n, concatenated.
+//   bowling: arr = the roll string as codes ('-' 45, '/' 47, 'X' 88, digits 0-9 as values); arr[0] = the score.
+//   camel_case: arr = the string as ASCII; the leading cells are the characters of the converted string (empty strings dropped).
+//   median (PSB1; no official file, data written by scripts/psb1_median_prepare.py): arr = {a, b, c}; arr[0] = the median.
 // The reference functions are checked against every loaded official case; a mismatch is reported on stderr.
 class Psb2Problem : public Problem {
 public:
     enum class Kind { FuelCost, Basement, Gcd, FindPair, CoinSums, Luhn, PairedDigits, CutVector, FizzBuzz, Mastermind, Twitter, MiddleChar,
-                      SolveBoolean, Leaders };
+                      SolveBoolean, Leaders, SquareDigits, Bowling, CamelCase, Median };
 
     // Loads <dir>/<name>/<name>-edge.json and <name>-random.json; the seed picks the sample (a different one each
     // run, as in PSB2).
