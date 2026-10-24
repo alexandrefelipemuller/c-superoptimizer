@@ -537,6 +537,7 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
         std::vector<Program> grownPool;
         grownPool.reserve(beam.size() * 2);
         for (auto& b : beam) {
+            if (config_.randomSearch) break;
             grownPool.push_back(b.program->clone());
             grownPool.push_back(growProgram(*b.program, size, rng, config_.genConfig));
         }
@@ -546,7 +547,7 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
         // tail (search/TailFiller.hpp). The tail is chosen on the instances of
         // EVERY level seen so far, not just this one: a small-n guard
         // (e.g. n = 1) only earns its keep on the early levels.
-        if (config_.tailEnumTop > 0 && !beam.empty()) {
+        if (config_.tailEnumTop > 0 && !beam.empty() && !config_.randomSearch) {
             std::vector<Instance> seen;
             for (int l = config_.startLevel; l <= currentLevel; l = problem_.nextLevel(l)) {
                 auto it = seenInstancesByLevel.find(l);
@@ -577,7 +578,7 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
         // subtree splicing (see SearchConfig::crossoverRate). Needs at
         // least 2 survivors to have two different parents to draw from.
         std::vector<Program> crossoverPool;
-        if (config_.crossoverRate > 0.0 && beam.size() >= 2) {
+        if (config_.crossoverRate > 0.0 && beam.size() >= 2 && !config_.randomSearch) {
             int crossoverCount = std::max(0, static_cast<int>(std::lround(config_.crossoverRate * config_.candidatesPerSize)));
             crossoverPool.reserve(static_cast<size_t>(crossoverCount));
             for (int c = 0; c < crossoverCount; ++c) {

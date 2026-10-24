@@ -156,6 +156,9 @@ struct SearchConfig {
     // the top `tailEnumTop` beam survivors at every size step. 0 = off,
     // byte-identical to before.
     int tailEnumTop = 0;
+    // Paper baseline (section 143): no feedback from the beam. Only fresh random programs of each size are scored (no growth or
+    // mutation of survivors, no tail enumeration, no crossover); the beam merely records the best of the current step.
+    bool randomSearch = false;
     // Section 89: from the second level on, every level's scoring set also
     // holds the first `regressionGuard` instances of each earlier level, so
     // a program that breaks smaller n loses score instead of only being

@@ -148,6 +148,7 @@ struct CliArgs {
     int invarianceLookahead = 3;
     double diversityRate = 0.0;
     double crossoverRate = 0.0;
+    bool randomSearch = false;
     double shapeNicheRate = 0.0;
     double behaviorNicheRate = 0.0;
     double speedBonusWeight = 0.0;
@@ -251,6 +252,7 @@ bool parseArgs(int argc, char** argv, CliArgs& args) {
         else if (arg == "--behavior-niche-rate") args.behaviorNicheRate = std::stod(next("--behavior-niche-rate"));
         else if (arg == "--speed-bonus-weight") args.speedBonusWeight = std::stod(next("--speed-bonus-weight"));
         else if (arg == "--post-solve-sizes") args.postSolveSizes = std::stoi(next("--post-solve-sizes"));
+        else if (arg == "--random-search") args.randomSearch = true;
         else if (arg == "--tail-enum") args.tailEnumTop = std::stoi(next("--tail-enum"));
         else if (arg == "--loop-bias") args.loopBias = std::stod(next("--loop-bias"));
         else if (arg == "--composite-bias") args.compositeBias = std::stod(next("--composite-bias"));
@@ -325,7 +327,7 @@ void printUsage() {
                  "--max-program-size 30 --step-limit 10000 --seed 1234 "
                  "[--start-level 1] [--candidates 800] [--num-vars 4 (auto-raised per-problem if omitted; see resolveNumVars)] [--threads 0] "
                  "[--invariance-lookahead 3] [--diversity-rate 0.0] [--crossover-rate 0.0] [--shape-niche-rate 0.0] "
-                 "[--behavior-niche-rate 0.0] [--speed-bonus-weight 0.0] [--post-solve-sizes 0] [--tail-enum 10] [--loop-bias 0.4] "
+                 "[--behavior-niche-rate 0.0] [--speed-bonus-weight 0.0] [--post-solve-sizes 0] [--tail-enum 10] [--random-search] [--loop-bias 0.4] "
                  "[--composite-bias 0.0] [--local-cond-mutation 0.3] [--no-local-cond-mutation] [--prune-generation] [--role-typed-vars] [--combinator-bias 0.5] [--combinator-v1] [--no-combinator-step] [--no-combinator-state] [--no-combinator-nested] [--no-combinator-frequency] [--combinator-follow] [--no-follow-pointer-inputs] [--no-combinator-orthogonal] [--no-combinator-argbest] [--no-combinator-distinct] [--regression-guard 12] [--no-follow-extended] [--no-scalar-loop] [--no-scalar-loop-index-range] [--no-combinator-triple] [--no-combinator-relax] [--no-combinator-grid] [--no-combinator-transform] [--no-distinct-aggregate] [--no-arg-sentinel] [--first-index] [--prefix-split] [--count-term P] [--square-term P] [--count-mod P] "
                  "[--adaptive-skeleton-bias-rate 0.0] [--adaptive-bias-log path.csv] "
                  "[--second-array-bias 0.0] [--recursion-call-bias 0.0] [--term-expr 0.3] [--prefix-cross 0.3] [--parity-term 0.03] [--pair-find 0.05] [--sum-if 0.05] [--radix 0.03] [--dc-shell-search 0.0] [--dc-shell-search-key 0.0] [--dc-shell-search-end 0.0] "
@@ -579,6 +581,7 @@ void runBenchmarkMode(const CliArgs& args) {
         config.speedBonusWeight = args.speedBonusWeight;
         config.postSolveSizes = args.postSolveSizes;
         config.tailEnumTop = args.tailEnumTop;
+        config.randomSearch = args.randomSearch;
         config.regressionGuard = args.regressionGuard;
         config.genConfig.loopAccumulatorBias = args.loopBias;
         config.genConfig.compositeBias = args.compositeBias;
@@ -1248,6 +1251,7 @@ int main(int argc, char** argv) {
     config.speedBonusWeight = args.speedBonusWeight;
     config.postSolveSizes = args.postSolveSizes;
     config.tailEnumTop = args.tailEnumTop;
+    config.randomSearch = args.randomSearch;
     config.regressionGuard = args.regressionGuard;
     config.genConfig.loopAccumulatorBias = args.loopBias;
     config.genConfig.compositeBias = args.compositeBias;
