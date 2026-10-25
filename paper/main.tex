@@ -28,7 +28,7 @@ published PushGP with lexicase selection (an unpaired comparison with published,
 designed after reading the failures on these same problems drops the total from 595 to 113 of 700 runs. A control that keeps the generators and removes all
 selection feedback (random search) solves as many runs as the beam (187 against 183 of 210), so on these problems the result belongs to the generators and
 the selection adds nothing measurable. On 17 further problems we detect no effect of the pieces, but most are at floor or ceiling in both arms and the test can see only
-large effects. A held-out set frozen before implementation (PSB2 Square Digits, Bowling, Camel Case and PSB1 Median, 30 seeds) shows the same: the pieces make no difference
+large effects. A held-out set frozen before implementation (PSB2 Square Digits, Bowling, Camel Case and PSB1 Median, 30 seeds) gives the same picture, though every problem is at floor or ceiling: the pieces make no difference
 (Median is solved in 30 of 30 runs with or without them; the other three in none), and random search finds nothing on Median. One narrow piece, a counting test on residues, does help within its own family (0 of 80 to 63 of 80 runs). Predictions were registered before the runs, and the failed ones are reported.
 \end{abstract}
 
@@ -57,9 +57,9 @@ with selection by the exact number of solved cases. There is no neural model, no
 
 The paper asks four questions. \textbf{RQ1}: what success rate does the system reach on the integer subset of PSB2 under the PSB2 criterion? \textbf{RQ2}: how much of it is due to the hand-designed generator pieces, and how much to the beam's selection? \textbf{RQ3}: do those pieces help on problems that did not guide their design (17 earlier problems and a frozen held-out set of four)? \textbf{RQ4}: how does the result depend on the computational budget? Section~\ref{sec:psb2} answers RQ1 and RQ4, Section~\ref{sec:ablation} RQ2, and Sections~\ref{sec:transfer}, \ref{sec:heldout} and~\ref{sec:narrow} RQ3. It is an experimental study of a non-learning imperative search, not a proposal of a new search algorithm.
 
-We emphasise method as much as numbers. Every comparison is run with matched random seeds. Predictions are written down before
+We emphasise method as much as numbers. Every comparison between two of our own configurations is run with matched random seeds. Predictions are written down before
 the runs and failed predictions are kept in the record. A change becomes a default only if it passes a regression battery of 77
-suite problems with a no-drop-of-two rule. The full log (144 numbered sections) is part of the artefact, in the public repository at \url{https://github.com/alexandrefelipemuller/AlgoSearch}.
+suite problems with a no-drop-of-two rule. The full log (146 numbered sections) is part of the artefact, in the public repository at \url{https://github.com/alexandrefelipemuller/AlgoSearch}.
 
 \paragraph{Contributions.}
 \begin{itemize}
@@ -74,7 +74,7 @@ suite problems with a no-drop-of-two rule. The full log (144 numbered sections) 
         on 17 problems they were not designed for (PSB2 and PSB1-style) we detect no effect, with power only for large effects (Section~\ref{sec:transfer}). One narrow, generic form
         (counting items by a remainder test) does close its own family, from 0 to 63 of 80 runs, at no measured cost
         (Section~\ref{sec:transfer}).
-  \item A frozen held-out test of four problems (Section~\ref{sec:heldout}), with predictions registered before the problems were implemented: the pieces make no difference, one problem is solved in every run without them, three are never solved, and random search fails where no piece applies.
+  \item A frozen held-out test of four problems (Section~\ref{sec:heldout}), with predictions registered before the problems were implemented: the pieces make no difference, but one problem is solved in every run without them and three are never solved, so the test cannot see moderate effects; random search fails where no piece applies.
   \item A documented protocol and a log of every experiment (the raw run output is not committed; see Appendix~\ref{app:repro}), including the claims that did not survive (for instance, ``six of
         seven problems above 93\%'' was true at 30 seeds and false at 100).
 \end{itemize}
@@ -218,7 +218,7 @@ version of the system; an ablation arm sets the probability of each of the six p
 so that the two arms differ only in those flags.
 
 \paragraph{Matched seeds and tests.}
-Every comparison between two configurations uses the same seeds. Paired comparisons (the same seed in two arms) use an exact McNemar test and unpaired ones a two-sided Fisher exact test. The tests are not corrected for multiple comparisons, so the few p-values below are descriptive. Binomial intervals are not tabulated: for reference, 28 of 30 has a 95\% Wilson interval of about 79--98\% and 91 of 100 one of about 84--95\%. Seed ranges used for different questions are disjoint
+Every comparison between two configurations uses the same seeds. Paired comparisons (the same seed in two arms) use an exact McNemar test and unpaired ones a two-sided Fisher exact test. The tests are not corrected for multiple comparisons, so the few p-values below are descriptive. Wilson intervals are tabulated only for Table~\ref{tab:psb2}; for reference, 28 of 30 has a 95\% Wilson interval of about 79--98\% and 91 of 100 one of about 84--95\%. Seed ranges used for different questions are disjoint
 (70000--70029 for the first PSB2 runs and 80000--80099 for the 100-seed runs; the transfer tests use other problems, and, apart from the first
 PSB2 transfer test, other ranges), so that a result is not re-tested on the seeds that
 motivated it, except in the budget experiments, which rerun the same seeds on purpose and say so.
@@ -231,7 +231,7 @@ refuted by an ablation; and a piece designed to count items by a term of the ele
 These are reported in Section~\ref{sec:results} and not omitted.
 
 \paragraph{Role of each experiment.}
-Table~\ref{tab:roles} classifies the experiments by what they were used for. Only the 100-seed PSB2 run was not used to choose anything; the others informed design decisions and should be read as exploratory.
+Table~\ref{tab:roles} classifies the experiments by what they were used for. Only the 100-seed PSB2 run and the held-out test were not used to choose anything; the others informed design decisions and should be read as exploratory.
 
 \begin{table}[t]
   \caption{Experiments by role.}
@@ -245,6 +245,7 @@ Table~\ref{tab:roles} classifies the experiments by what they were used for. Onl
     Transfer (Table~\ref{tab:transfer}) & other ranges & exploratory test \\
     Count-mod (Table~\ref{tab:mod}) & 76000--76019 & development, siblings by us \\
     PSB2 main run, pieces on and off & 80000--80099 & final evaluation \\
+    Held-out test (Table~\ref{tab:heldout}) & 80000--80029 & frozen before implementation \\
     Budget rerun (1800\,s) & 80000--80099 & same seeds, on purpose \\
     \bottomrule
   \end{tabular}
@@ -305,14 +306,14 @@ limit, a run's depth at a given time depends on machine load, so rates near the 
 Counting the candidates scored per run (median over the 100 runs; one candidate is scored on 200 training cases), GCD, Basement and Find Pair are solved in the first size step, after about 1,500 candidates; Paired Digits needs about 13,000; Luhn and Fuel Cost about 75,000 and 94,000; Coin Sums about 302,000, most of them runs that end on the 60 million cap. Scoring takes 98--99\% of wall time in every problem (generation under 2\%), so the wall limit measures evaluations. The number of executions to a solve is the more portable cost: medians of 0.3 million (GCD, Basement, Find Pair), 2.8 (Paired Digits), 13.9 (Luhn) and 16.0 (Fuel Cost).
 
 \paragraph{Cost against a PushGP run.}
-We could not rerun the PushGP baseline. We installed the reference implementation of the PSB2 paper (Clojush, tag \texttt{psb2-v1.0}, with its published settings: 1,000 individuals, 300 generations, lexicase selection and UMAD) and ran Fuel Cost on the same laptop, using all eight hardware threads. A generation took about 4.5 minutes with the default JVM and about 3.1 minutes with a tuned heap and parallel collector, measured over five and three generations before we stopped the run. One generation is 200 thousand executions (1,000 individuals on 200 cases), so the throughput is about 1,000 executions per second on eight threads, against a median of 64 thousand per second for one of our Fuel Cost runs on one thread (eight runs in parallel). A run that does not solve would take 300 generations, between 16 and 22 hours; our median solved Fuel Cost run takes 4 minutes, the slowest 15. This is a measurement of one problem, one machine, a few early generations and a reference implementation not tuned for speed, in a different language; it says how long the two programs take for the same 60 million executions, not that our search needs fewer of them (Fuel Cost: median 16 million to solve, against a cap of 60). It is also the reason there is no rerun of the baseline here: 210 runs would take months on this machine.
+We could not rerun the PushGP baseline. We installed the reference implementation of the PSB2 paper (Clojush, tag \texttt{psb2-v1.0}, with its published settings: 1,000 individuals, 300 generations, lexicase selection and UMAD) and ran Fuel Cost on the same laptop, using all eight hardware threads. A generation took about 4.5 minutes with the default JVM and about 3.1 minutes with a tuned heap and parallel collector, taken from the first five and the first three generations, after which we stopped each run. One generation is 200 thousand executions (1,000 individuals on 200 cases), so the throughput is roughly 800 to 1,000 executions per second on eight threads, against a median of 64 thousand per second for one of our Fuel Cost runs on one thread (eight runs in parallel). A run that does not solve would take 300 generations, between 16 and 22 hours; our median solved Fuel Cost run takes 4 minutes, the slowest 15. This is a measurement of one problem, one machine, a few early generations and a reference implementation not tuned for speed, in a different language; it says how long the two programs take for the same 60 million executions, not that our search needs fewer of them (Fuel Cost: median 16 million to solve, against a cap of 60). It is also the reason there is no rerun of the baseline here: 210 runs would take months on this machine.
 
 \subsection{Ablation of the Pieces}
 \label{sec:ablation}
 Table~\ref{tab:ablation} gives the effect of the six pieces designed on the integer subset, with 30 seeds per problem (seeds 70000--70029, 900\,s). These are the seeds on which the pieces and their probabilities were developed, so the table is in-sample. We therefore repeated the ablation on the 100 final seeds (80000--80099, Table~\ref{tab:psb2}, column ``Pieces off''): with the six pieces off the search solves 113 of 700 runs (GCD 100, Paired Digits 13, nothing else) against 595 with them on. Every prediction registered for this run held. No seed solved with the pieces off was missed with them on, and the paired difference is significant for each problem except GCD (exact McNemar, $p<10^{-4}$). The effect is the same size as in the in-sample table, so the seeds are not the explanation; it also means that the pieces account for essentially all the gain over the base search on these problems.
 
 \paragraph{Is the beam needed? A random-search control.}
-To separate the beam's selection from the generators, we ran a baseline that keeps the generators but removes all feedback: at each size only fresh random programs are scored (2,000 per size, so the 150 sizes spend the 60 million executions), with no growth or mutation of survivors, no tail enumeration and no crossover. Table~\ref{tab:arms} gives the four arms on the first 30 final seeds (80000--80029), with the cap, not the clock, binding. With the pieces on, random search solves 187 of 210 runs against 183 for the beam; the paired differences are not significant (Luhn 30 against 27, exact McNemar $p=0.25$; Coin Sums 7 against 6, $p=1$), and it needs fewer executions per solved run (median 9.2 against 14.0 million for Fuel Cost). With the pieces off, random search solves GCD only (30 of 210), against 37 for the beam. We had predicted random search to fall well below the beam; six of the seven predictions for it failed. The solved programs of the random arm are single draws of the piece's block (for Fuel Cost, the sum of \texttt{arr[i]/3 - 2}). On these seven problems, then, what the search needs is the generators, and the selection by solved cases adds nothing we can measure. This does not show that selection never matters: ``random'' here means fresh draws from the same hand-built generators, not uniform sampling of syntax trees, and the evidence that selection is needed in our suite comes from sorting and search problems that this experiment does not touch.
+To separate the beam's selection from the generators, we ran a baseline that keeps the generators but removes all feedback: at each size only fresh random programs are scored (2,000 per size, so the 150 sizes spend the 60 million executions), with no growth or mutation of survivors, no tail enumeration and no crossover. Table~\ref{tab:arms} gives the four arms on the first 30 final seeds (80000--80029), with the cap, not the clock, binding. With the pieces on, random search solves 187 of 210 runs against 183 for the beam; the paired differences are not significant (Luhn 30 against 27, exact McNemar $p=0.25$; Coin Sums 7 against 6, $p=1$), and it needs fewer executions per solved run (median 9.2 against 14.0 million for Fuel Cost). With the pieces off, random search solves GCD only (30 of 210), against 37 for the beam. We had predicted random search to fall well below the beam; six of the seven predictions for it failed. The solved programs of the random arm are single draws of the piece's block (for Fuel Cost, the sum of \texttt{arr[i]/3 - 2}). On these seven problems, then, what the search needs is the generators, and the selection by solved cases adds nothing we can measure. This does not show that selection never matters: ``random'' here means fresh draws from the same hand-built generators, not uniform sampling of syntax trees, and the evidence that selection is needed comes from the sorting and search problems of our suite and, in Section~\ref{sec:heldout}, from Median.
 
 \begin{table}[t]
   \caption{Solved runs of 30 (seeds 80000--80029, 60 million executions): beam search or random search, six pieces on or off.}
@@ -418,7 +419,7 @@ The transfer problems above were still chosen after the pieces existed, and some
   \end{tabular}
 \end{table}
 
-All five predictions held. The pieces make no difference on any problem (the registered limit was three runs; the difference is zero), so they do not transfer, as the interpretation of Section~\ref{sec:transfer} suggested. Median is solved in every beam run, with a median of 11.6 thousand scored candidates, by the base grammar alone. Bowling and Camel Case, which need a frame state machine and a conditional rewrite, and Square Digits are outside the reach of the system with or without the pieces. On Camel Case the identity program (size 1) already matches 66 of 200 training cases, because strings without a hyphen are unchanged, so the partial score gives the beam no gradient there. Random search finds nothing on Median, against 30 of 30 for the beam. This complements the control of Section~\ref{sec:ablation}: where a piece produces the answer in a single draw, the selection adds nothing, but where none applies the selection by solved cases is what finds it. Two caveats: every random run stopped by exhausting its fresh candidates (298\,thousand scored, about 26 times what the beam needed on Median), not by reaching the cap, so ``0 of 30'' refers to that sample size; and three problems at zero in every arm cannot separate the arms.
+All five predictions held. The pieces make no difference on any problem (the registered limit was three runs; the difference is zero). This is weaker than it sounds: every problem is at floor or ceiling in both arms (Median at 30 of 30, the others at zero), so no problem could show a moderate effect, and the result says only that the pieces did not extend the reach of the system to problems of a different structure, as the interpretation of Section~\ref{sec:transfer} suggested. Median is solved in every beam run, with a median of 11.6 thousand scored candidates, by the base grammar alone. Bowling and Camel Case, which need a frame state machine and a conditional rewrite, and Square Digits are outside the reach of the system with or without the pieces. On Camel Case the identity program (size 1) already matches 66 of 200 training cases, because strings without a hyphen are unchanged, so the partial score gives the beam no gradient there. Random search finds nothing on Median, against 30 of 30 for the beam. This complements the control of Section~\ref{sec:ablation}: where a piece produces the answer in a single draw, the selection adds nothing, but where none applies the selection by solved cases is what finds it. Two caveats: every random run stopped by exhausting its fresh candidates (298\,thousand scored, about 26 times what the beam needed on Median), not by reaching the cap, so ``0 of 30'' refers to that sample size; and three problems at zero in every arm cannot separate the arms.
 
 \subsection{A Narrow Piece That Does Transfer Within Its Family}
 \label{sec:narrow}
@@ -481,7 +482,7 @@ grammar did not reach (Section~\ref{sec:narrow}).
 
 \paragraph{What it does not support.}
 The central caveat is that the six pieces that lift the PSB2 results were designed after observing where the search failed on \emph{those} problems. Their effect on
-them is therefore not a held-out result. The transfer experiments of Section~\ref{sec:transfer} were designed to test that, and detected no effect on 17 other problems, and a frozen held-out set of four (Section~\ref{sec:heldout}) shows none either. In the earlier set some problems were
+them is therefore not a held-out result. The transfer experiments of Section~\ref{sec:transfer} were designed to test that, and detected no effect on 17 other problems, and a frozen held-out set of four (Section~\ref{sec:heldout}) shows none either, although all four of its problems are at floor or ceiling in both arms. In the earlier set some problems were
 degenerate or out of reach for both arms, and the test had power only for large effects (about 0.3 to 0.45 in success rate at 20 runs per arm). We read this as a limit on the claim, not as a failure of the pieces: a piece can be useful
 exactly on the structure it was built for, and that is also what the count-mod result shows. But it means that the PSB2 numbers describe this system
 with its pieces tuned to these seven problems and must not be read as the expected performance on a new problem. Nor do they show that beam search is a good way to find programs: with the generators fixed, random search does as well on these seven problems, although on Median, where no piece applies, it finds nothing and the beam solves every run.
@@ -514,7 +515,7 @@ comparison on the subset of the benchmark that suits this language, and we make 
 \paragraph{Comparison with the published baseline.}
 The PushGP figures are those of one untuned configuration reported with the benchmark. Our figures use a wall-clock limit as well as the cap on program
 executions, our own tuning of generic pieces, and a single configuration with no tuned comparison arm. A fair comparison would run a tuned PushGP, or another
-non-neural system, at the same budget on the same seeds, which we did not do. GCD is also a problem that the search was built to solve from its earliest versions, so it is not independent evidence.
+non-neural system, at the same budget on the same seeds, which we did not do: the reference implementation proved too slow to rerun on our hardware (Section~\ref{sec:psb2}). GCD is also a problem that the search was built to solve from its earliest versions, so it is not independent evidence.
 
 \paragraph{Budget and reproducibility.}
 The success rates of Fuel Cost and Luhn depend on the time limit: their curves are still rising at 900\,s and a rerun of failed Luhn seeds at twice the time solved most of them. Because the limit is on wall-clock time, results
@@ -522,7 +523,7 @@ carry timing noise that depends on machine load, and are not reproducible to the
 reproduction would use only it. The results come from one machine.
 
 \paragraph{Our own problem sets.}
-Three groups of problems are ours: lossless encodings of PSB2 problems that are not in the official format, PSB1-style problems generated by our own code with ranges chosen by us (and
+Four groups of problems are ours: the Median data of the held-out test, generated by our own code from the PSB1 description; lossless encodings of PSB2 problems that are not in the official format, PSB1-style problems generated by our own code with ranges chosen by us (and
 changed once after seeing the first result, which is a forking path that we report), and families of siblings written to test a piece. These are useful for
 testing mechanisms but are not external benchmarks.
 
@@ -534,7 +535,7 @@ author. We state this because it affects how the process, and not the numbers, s
 A beam search over a small imperative language, with no learning, solves the seven integer problems of PSB2 at rates between 14 and 100 of 100
 runs, and four of them in every run. The supported claim is narrow: those rates, on those problems, under the PSB2 success criterion. The
 pieces that produced them were designed on the same problems, and on 17 unseen problems we detect no effect of them; the one
-piece that transferred did so within a family of closely related problems. A held-out set frozen before implementation confirms the first point: the pieces make no difference on four new problems, one of which (Median) the base grammar solves in every run, while three stay out of reach. A control that keeps the generators and removes the selection
+piece that transferred did so within a family of closely related problems. A held-out set frozen before implementation is consistent with the first point: the pieces make no difference on four new problems, but one (Median) is solved by the base grammar in every run and three stay out of reach, so it cannot show moderate effects. A control that keeps the generators and removes the selection
 (random search) solves as many runs as the beam, so on those problems the result belongs to the hand-built bias and not to the search; on Median, where no piece applies, random search fails and the beam does not. Failed predictions, including a wrong diagnosis of the Fuel
 Cost failures and the expectation that random search would fall well below the beam, are part of the record. The next steps are a tuned baseline arm on the same 100 seeds, PSB2 problems that need strings and
 floats (which the language cannot yet express), and a second held-out set that includes problems with strings and state machines.
