@@ -359,6 +359,26 @@ total of 119 of 210 (the intermediate figures of 29 are at those high probabilit
   \end{tabular}
 \end{table}
 
+\paragraph{Leaving one piece out.}
+The steps above add pieces cumulatively on the development seeds, which does not isolate any one of them. We therefore ran, on the final seeds (80000--80029, 900\,s, 60 million cap), one arm per piece with that piece at zero and the other five at their defaults, on the problem the piece was built for and on the problem where an interaction was plausible (270 runs; predictions registered before running, log section 147). Table~\ref{tab:loo} gives the result. Five of the six pieces are each indispensable for their problem: without term expression Fuel Cost falls from 30 to 1 of 30, without prefix crossing Basement from 30 to 0, without pair find Find Pair from 30 to 0, without the parity term Luhn from 27 to 0, and without sum-if Paired Digits from 30 to 2. Radix is not: without it Paired Digits is still solved in 30 of 30 runs, so with sum-if present the radix piece adds nothing there; we had predicted the opposite, and the prediction failed. This experiment does not show what radix is for. No other cell changes by more than two runs (Luhn without term expression or pair find: 26 of 30; Fuel Cost without the parity term: 28), so we saw no interaction, but with 30 runs per cell only large effects are detectable, and Coin Sums, GCD and the full piece-by-problem matrix were not run.
+\begin{table}[t]
+  \caption{Leave-one-out on the final seeds: solved runs of 30 with one piece at zero and the other five at their defaults. Reference: all six on, same seeds. A dash is a cell not run.}
+  \label{tab:loo}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    Piece set to zero & Fuel Cost & Luhn & Basement & Find Pair & Paired Digits \\
+    \midrule
+    None (reference) & 30 & 27 & 30 & 30 & 30 \\
+    Term expression & 1 & 26 & -- & -- & -- \\
+    Prefix crossing & -- & -- & 0 & -- & -- \\
+    Pair find & -- & 26 & -- & 0 & -- \\
+    Parity term & 28 & 0 & -- & -- & -- \\
+    Sum-if & -- & -- & -- & -- & 2 \\
+    Radix & -- & -- & -- & -- & 30 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
 \paragraph{Cost on the rest of the suite.}
 A piece that helps the seven problems is only acceptable if it does not hurt the others, so each change was run through the
 77-problem regression battery of Section~\ref{sec:protocol}. Term expression and prefix crossing together solved 755 of 770 problem--seed
@@ -476,7 +496,7 @@ attractor hypothesis is rejected, and what holds the last runs back is the size 
 \paragraph{What the evidence supports.}
 On the integer subset of PSB2 and under the PSB2 protocol, a search with no learning solves four of seven problems in every one of 100 runs, two in about 90 and one
 in 14, rates above the published PushGP counts on all seven, which are a historical reference and not a controlled comparison (Section~\ref{sec:psb2}). The six generic pieces together account for the difference from our own
-baseline (their individual contributions were measured stepwise on the development seeds, not by leaving one out on the final seeds), with no cost detected on 77 other problems (a battery near its ceiling, with run-to-run noise of about three) (Section~\ref{sec:ablation}). A random-search control with the same generators matches the beam (Table~\ref{tab:arms}), so sampling from the generators suffices on these problems and the selection is not what carries the result there. A single narrow piece closes a family of counting problems that the previous
+baseline (leaving one piece out on the final seeds shows five of the six indispensable for their problem and radix redundant for Paired Digits, Table~\ref{tab:loo}), with no cost detected on 77 other problems (a battery near its ceiling, with run-to-run noise of about three) (Section~\ref{sec:ablation}). A random-search control with the same generators matches the beam (Table~\ref{tab:arms}), so sampling from the generators suffices on these problems and the selection is not what carries the result there. A single narrow piece closes a family of counting problems that the previous
 grammar did not reach (Section~\ref{sec:narrow}).
 
 \paragraph{What it does not support.}
@@ -562,6 +582,7 @@ sections 126--146 of that log, and the earlier sections cover the development of
   \item Random-search baseline: flag \texttt{-{}-random-search} with \texttt{-{}-candidates 2000 -{}-tail-enum 0}, seeds 80000--80029, \texttt{WALL=3000} (log section 143); per-run tables \path{paper/data/psb2_random_on_runs.csv} and \path{psb2_random_off_runs.csv}.
   \item Code version: the PSB2 runs of Table~\ref{tab:psb2} used the repository head 35cf3a5; the \texttt{-{}-random-search} flag was added afterwards and does not change the default path (the 254 earlier tests are unchanged; one test, for the held-out problems, was added, making 255). Dataset checksums (SHA-256 of the edge and random files of the seven problems): \path{paper/data/psb2_dataset_sha256.txt}.
   \item Per-run tables (solved, seconds, candidates scored, executions, stop reason): \path{paper/data/psb2_900s_runs.csv} and \path{psb2_1800s_runs.csv} and \path{psb2_pieces_off_900s_runs.csv}, produced by \path{scripts/psb2_run_table.py} (log section 142; the pieces-off arm is 142b).
+  \item Leave-one-out (Table~\ref{tab:loo}): \path{scripts/run_psb2.sh} with seeds 80000--80029, one piece probability set to zero per arm; per-run tables \path{paper/data/leave_one_out_<piece>_runs.csv}, one per piece (term expression, prefix crossing, pair find, parity term, sum-if, radix) (log section 147).
   \item Held-out test (Section~\ref{sec:heldout}): \path{scripts/run_psb2.sh} with seeds 80000--80029 for \texttt{psb2\_square\_digits}, \texttt{psb2\_bowling}, \texttt{psb2\_camel\_case} and \texttt{psb1\_median\_heldout}; the Median data are generated by \path{scripts/psb1_median_prepare.py} (seed 145); the pieces-off arm sets the six piece probabilities to zero and the random arm uses \texttt{-{}-random-search}; per-run tables \path{paper/data/heldout_beam_on_runs.csv}, \path{heldout_beam_off_runs.csv} and \path{heldout_random_on_runs.csv} (log section 145).
   \item Tests: \texttt{make test} (255 tests).
 \end{itemize}
