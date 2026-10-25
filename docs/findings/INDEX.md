@@ -271,3 +271,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 146. PushGP baseline rerun measured and judged not feasible: 190-277 s per generation for fuel_cost, 16-22 h per non-solving run | 11_sections_121-125.md | 1312 |
 | 147. Leave-one-out of the six pieces on the final seeds (30 seeds, 270 runs), registered before running | 11_sections_121-125.md | 1325 |
 | 147r. Leave-one-out: term-expr, prefix-cross, pair-find, parity-term, sum-if each indispensable for its problem; radix redundant for paired_digits (30/30); no interaction seen; prediction 5 half failed | 11_sections_121-125.md | 1339 |
+| 147s. Clock check: the three Luhn seeds the beam lost at 900 s are solved at 392-447 s when alone with a 3000 s clock; random-control gap on Luhn was the clock | 11_sections_121-125.md | 1347 |

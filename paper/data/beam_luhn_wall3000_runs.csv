@@ -1,0 +1,4 @@
+problem,seed,solved,seconds,scored,executions,stop
+luhn,80004,1,391.592,221470,44294000,solved
+luhn,80014,1,447.399,241743,48348600,solved
+luhn,80019,1,412.048,196106,39221200,solved
