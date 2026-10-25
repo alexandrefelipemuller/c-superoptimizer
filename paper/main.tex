@@ -1,6 +1,7 @@
 % Numbers come from docs/claims.md and docs/findings/ (section numbers in comments). Build: see README.md.
 \documentclass[sigconf,nonacm]{acmart}
 \usepackage{graphicx}
+\emergencystretch=2em
 
 \settopmatter{printacmref=false}
 \renewcommand\footnotetextcopyrightpermission[1]{}
@@ -217,10 +218,10 @@ version of the system; an ablation arm sets the probability of each of the six p
 so that the two arms differ only in those flags.
 
 \paragraph{Matched seeds and tests.}
-Every comparison between two configurations uses the same seeds. Paired comparisons (the same seed in two arms) use an exact McNemar test and unpaired ones a two-sided Fisher exact test. The tests are not corrected for multiple comparisons, so the few p-values below are descriptive. Wilson intervals are tabulated only for Table~\ref{tab:psb2}; for reference, 28 of 30 has a 95\% Wilson interval of about 79--98\% and 91 of 100 one of about 84--95\%. Seed ranges used for different questions are disjoint
+Every comparison between two configurations uses the same seeds. Paired comparisons (the same seed in two arms) use an exact McNemar test and unpaired ones a two-sided Fisher exact test. The tests are not corrected for multiple comparisons, so the few p-values below are descriptive. Wilson intervals are tabulated only for Table~\ref{tab:psb2}; for reference, 28 of 30 has a 95\% Wilson interval of about 79--98\% and 91 of 100 one of about 84--95\%. Seed ranges used for different questions are disjoint, with the exceptions listed below
 (70000--70029 for the first PSB2 runs and 80000--80099 for the 100-seed runs; the transfer tests use other problems, and, apart from the first
 PSB2 transfer test, other ranges), so that a result is not re-tested on the seeds that
-motivated it, except in the budget experiments, which rerun the same seeds on purpose and say so.
+motivated it. The reuse is intentional in three places: the budget experiments rerun the same 100 seeds, the random-search control and the held-out test use the first 30 of them (80000--80029) so that its arms are paired with the beam arms, and the held-out problems are different from those of the 100-seed run.
 
 \paragraph{Predictions registered before the runs.}
 For each experiment after the first, we wrote the expected outcome in the project log before launching it, with numerical bounds,
@@ -549,21 +550,20 @@ The implementation and the analysis scripts were written with the help of an AI 
 \appendix
 \section{Reproducibility}
 \label{app:repro}
-The code, the tests and the full log are at \url{https://github.com/alexandrefelipemuller/AlgoSearch}. The repository holds a log of every experiment (\texttt{docs/findings/}, indexed by \texttt{INDEX.md}); this paper reflects
-sections 126--144 of that log, and the earlier sections cover the development of the system itself. The raw run output (\texttt{data/}) is
-program-generated and is not committed, so the per-run counts behind the tables can be regenerated with the commands below but are not archived with the paper.
+The code, the tests and the full log are at \url{https://github.com/alexandrefelipemuller/AlgoSearch}. The repository holds a log of every experiment (\path{docs/findings/}, indexed by \texttt{INDEX.md}); this paper reflects
+sections 126--146 of that log, and the earlier sections cover the development of the system itself. The raw execution logs under \path{data/} are program-generated and are not committed. The derived per-run CSV tables used to reconstruct the reported results are provided under \path{paper/data/}, and the raw logs can be regenerated with the commands below.
 
 \begin{itemize}
-  \item Main run (Section~\ref{sec:psb2}): \texttt{scripts/run\_psb2.sh} with seeds 80000--80099, a 900\,s wall budget and the defaults of the repository head
+  \item Main run (Section~\ref{sec:psb2}): \path{scripts/run_psb2.sh} with seeds 80000--80099, a 900\,s wall budget and the defaults of the repository head
   (log section 139).
   \item 1800\,s rerun (Fuel Cost and Luhn): \texttt{PROBLEMS="psb2\_fuel\_cost psb2\_luhn" WALL=1800 MAXEXEC=120000000} (section 141).
-  \item Figure~\ref{fig:time}: \texttt{scripts/plot\_success\_vs\_time.py}, which also writes the per-run solve times to a CSV file.
-  \item Datasets: the official PSB2 files, downloaded unchanged; the PSB1-style generators are our own and are in \texttt{src/problems/}.
-  \item Fuel Cost with a size limit of 300: seeds 80035, 80043, 80074, 80091, 80097, 80099, \texttt{--max-program-size 300}, 1800\,s, 120 million cap (log section 144), table \texttt{paper/data/fuel\_cost\_size300\_runs.csv}.
-  \item Random-search baseline: flag \texttt{--random-search} with \texttt{--candidates 2000 --tail-enum 0}, seeds 80000--80029, \texttt{WALL=3000} (log section 143); per-run tables \texttt{paper/data/psb2\_random\_on\_runs.csv} and \texttt{psb2\_random\_off\_runs.csv}.
-  \item Code version: the PSB2 runs of Table~\ref{tab:psb2} used the repository head 35cf3a5; the \texttt{--random-search} flag was added afterwards and does not change the default path (the 254 tests are unchanged). Dataset checksums (SHA-256 of the edge and random files of the seven problems): \texttt{paper/data/psb2\_dataset\_sha256.txt}.
-  \item Per-run tables (solved, seconds, candidates scored, executions, stop reason): \texttt{paper/data/psb2\_900s\_runs.csv} and \texttt{psb2\_1800s\_runs.csv} and \texttt{psb2\_pieces\_off\_900s\_runs.csv}, produced by \texttt{scripts/psb2\_run\_table.py} (log section 142; the pieces-off arm is 142b).
-  \item Held-out test (Section~\ref{sec:heldout}): \texttt{scripts/run\_psb2.sh} with seeds 80000--80029 for \texttt{psb2\_square\_digits}, \texttt{psb2\_bowling}, \texttt{psb2\_camel\_case} and \texttt{psb1\_median\_heldout}; the Median data are generated by \texttt{scripts/psb1\_median\_prepare.py} (seed 145); the pieces-off arm sets the six piece probabilities to zero and the random arm uses \texttt{--random-search}; per-run tables \texttt{paper/data/heldout\_beam\_on\_runs.csv}, \texttt{heldout\_beam\_off\_runs.csv} and \texttt{heldout\_random\_on\_runs.csv} (log section 145).
+  \item Figure~\ref{fig:time}: \path{scripts/plot_success_vs_time.py}, which also writes the per-run solve times to a CSV file.
+  \item Datasets: the official PSB2 files, downloaded unchanged; the PSB1-style generators are our own and are in \path{src/problems/}.
+  \item Fuel Cost with a size limit of 300: seeds 80035, 80043, 80074, 80091, 80097, 80099, \texttt{--max-program-size 300}, 1800\,s, 120 million cap (log section 144), table \path{paper/data/fuel_cost_size300_runs.csv}.
+  \item Random-search baseline: flag \texttt{--random-search} with \texttt{--candidates 2000 --tail-enum 0}, seeds 80000--80029, \texttt{WALL=3000} (log section 143); per-run tables \path{paper/data/psb2_random_on_runs.csv} and \path{psb2_random_off_runs.csv}.
+  \item Code version: the PSB2 runs of Table~\ref{tab:psb2} used the repository head 35cf3a5; the \texttt{--random-search} flag was added afterwards and does not change the default path (the 254 earlier tests are unchanged; one test, for the held-out problems, was added, making 255). Dataset checksums (SHA-256 of the edge and random files of the seven problems): \path{paper/data/psb2_dataset_sha256.txt}.
+  \item Per-run tables (solved, seconds, candidates scored, executions, stop reason): \path{paper/data/psb2_900s_runs.csv} and \path{psb2_1800s_runs.csv} and \path{psb2_pieces_off_900s_runs.csv}, produced by \path{scripts/psb2_run_table.py} (log section 142; the pieces-off arm is 142b).
+  \item Held-out test (Section~\ref{sec:heldout}): \path{scripts/run_psb2.sh} with seeds 80000--80029 for \texttt{psb2\_square\_digits}, \texttt{psb2\_bowling}, \texttt{psb2\_camel\_case} and \texttt{psb1\_median\_heldout}; the Median data are generated by \path{scripts/psb1_median_prepare.py} (seed 145); the pieces-off arm sets the six piece probabilities to zero and the random arm uses \texttt{--random-search}; per-run tables \path{paper/data/heldout_beam_on_runs.csv}, \path{heldout_beam_off_runs.csv} and \path{heldout_random_on_runs.csv} (log section 145).
   \item Tests: \texttt{make test} (255 tests).
 \end{itemize}
 
