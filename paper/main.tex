@@ -22,13 +22,15 @@
 
 \begin{abstract}
 We ask how much of the success of a program-synthesis search with no machine learning is due to the search and how much to hand-designed
-generators. The system is a beam search over the syntax trees of a small imperative language, driven by generators of loop and conditional shapes and
-by an exact count of solved training cases. On the seven integer problems of PSB2, with 100 fresh seeds, a 900\,s budget and 2,000 unseen test cases per run,
-it solves GCD, Basement, Find Pair and Paired Digits in every run, Fuel Cost and Luhn in 91 and 90, and Coin Sums in 14. Turning off six generator pieces that we
-designed after reading the failures on these same problems drops the total from 595 to 113 of 700 runs; the effect is measured on these problems only. A control that keeps the generators and removes all
-selection feedback (random search) solves as many runs as the beam (187 against 183 of 210): sampling directly from the generators is enough on these problems, and we measure no benefit from the beam's selection. The counts are above the published PushGP counts on all seven, a historical reference and not a controlled comparison: the baseline was not rerun. On 17 further problems we detect no effect of the pieces, but most are at floor or ceiling in both arms and the test can see only
-large effects. A held-out set frozen before implementation (PSB2 Square Digits, Bowling, Camel Case and PSB1 Median, 30 seeds) gives the same picture, though every problem is at floor or ceiling: the pieces make no difference
-(Median is solved in 30 of 30 runs with or without them; the other three in none), and random search finds nothing on Median. One narrow piece, a counting test on residues, does help within its own family (0 of 80 to 63 of 80 runs). Predictions were registered before the runs, and the failed ones are reported.
+generators. On the seven integer problems of PSB2 the answer is that nearly all of it is the generators. The system is a beam search over the syntax trees of a small imperative language, with
+selection by an exact count of solved training cases. With six generator pieces that we designed after reading its failures on these same problems, it solves 595 of 700 runs
+(100 fresh seeds, a 900\,s budget, 2,000 unseen test cases per run); with the pieces off it solves 113, and leaving one piece out at a time shows five of the six indispensable for their problem
+and one (radix) redundant for Paired Digits. A control that keeps the generators and removes all selection feedback (random search) solves as many runs as the beam (187 against 183 of 210; the gap on Luhn is a clock effect):
+sampling directly from the generators is enough on these problems, and we measure no benefit from selection there. The pieces do not extend the reach of the system. On 17 further problems we detect no effect, and on a held-out set
+frozen before implementation (PSB2 Square Digits, Bowling, Camel Case and PSB1 Median, 30 seeds) the pieces make no difference, although every problem is at floor or ceiling, so only large effects could show.
+On Median, where no piece applies, random search finds nothing and the beam solves every run; the control removes both selection and the variation of survivors, so it cannot say which matters. One narrow piece, a counting test on residues, does help within its own family
+(0 of 80 to 63 of 80 runs). The per-problem counts (GCD, Basement, Find Pair and Paired Digits in 100 of 100 runs, Fuel Cost 91, Luhn 90, Coin Sums 14) are above the published PushGP counts, a 2021 baseline that we did not rerun,
+so they are a historical reference and not a controlled comparison. Predictions were registered before the runs, and the failed ones are reported.
 \end{abstract}
 
 \keywords{program synthesis, beam search, genetic programming, PSB2, benchmark, negative results}
