@@ -23,8 +23,7 @@
 We ask how much of the success of a program-synthesis search with no machine learning is due to the search and how much to hand-designed
 generators. The system is a beam search over the syntax trees of a small imperative language, driven by generators of loop and conditional shapes and
 by an exact count of solved training cases. On the seven integer problems of PSB2, with 100 fresh seeds, a 900\,s budget and 2,000 unseen test cases per run,
-it solves GCD, Basement, Find Pair and Paired Digits in every run, Fuel Cost and Luhn in 91 and 90, and Coin Sums in 14, higher on all seven than the
-published PushGP with lexicase selection (an unpaired comparison with published, untuned figures, not a rerun). Turning off six generator pieces that we
+it solves GCD, Basement, Find Pair and Paired Digits in every run, Fuel Cost and Luhn in 91 and 90, and Coin Sums in 14, above the published PushGP counts on all seven (a historical reference, not a controlled comparison: the baseline was not rerun). Turning off six generator pieces that we
 designed after reading the failures on these same problems drops the total from 595 to 113 of 700 runs. A control that keeps the generators and removes all
 selection feedback (random search) solves as many runs as the beam (187 against 183 of 210), so on these problems the result belongs to the generators and
 the selection adds nothing measurable. On 17 further problems we detect no effect of the pieces, but most are at floor or ceiling in both arms and the test can see only
@@ -476,8 +475,8 @@ attractor hypothesis is rejected, and what holds the last runs back is the size 
 
 \paragraph{What the evidence supports.}
 On the integer subset of PSB2 and under the PSB2 protocol, a search with no learning solves four of seven problems in every one of 100 runs, two in about 90 and one
-in 14, rates above the published PushGP baseline on all seven (Section~\ref{sec:psb2}). Six generic pieces account for the difference from our own
-baseline, with no cost detected on 77 other problems (a battery near its ceiling, with run-to-run noise of about three) (Section~\ref{sec:ablation}). A random-search control with the same generators matches the beam (Table~\ref{tab:arms}), so the result belongs to the generators and not to the selection. A single narrow piece closes a family of counting problems that the previous
+in 14, rates above the published PushGP counts on all seven, which are a historical reference and not a controlled comparison (Section~\ref{sec:psb2}). The six generic pieces together account for the difference from our own
+baseline (their individual contributions were measured stepwise on the development seeds, not by leaving one out on the final seeds), with no cost detected on 77 other problems (a battery near its ceiling, with run-to-run noise of about three) (Section~\ref{sec:ablation}). A random-search control with the same generators matches the beam (Table~\ref{tab:arms}), so the result belongs to the generators and not to the selection. A single narrow piece closes a family of counting problems that the previous
 grammar did not reach (Section~\ref{sec:narrow}).
 
 \paragraph{What it does not support.}
