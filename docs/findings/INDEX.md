@@ -270,3 +270,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 145r. Held-out: median 30/30 with and without pieces, random 0/30; the other three 0/30 in every arm; five of five predictions met | 11_sections_121-125.md | 1290 |
 | 146. PushGP baseline rerun measured and judged not feasible: 190-277 s per generation for fuel_cost, 16-22 h per non-solving run | 11_sections_121-125.md | 1312 |
 | 147. Leave-one-out of the six pieces on the final seeds (30 seeds, 270 runs), registered before running | 11_sections_121-125.md | 1325 |
+| 147r. Leave-one-out: term-expr, prefix-cross, pair-find, parity-term, sum-if each indispensable for its problem; radix redundant for paired_digits (30/30); no interaction seen; prediction 5 half failed | 11_sections_121-125.md | 1339 |
