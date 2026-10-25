@@ -268,3 +268,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 144r. All six fuel_cost failures solve at size limit 300, needing 79-107M executions (above the 60M cap); prediction failed | 11_sections_121-125.md | 1262 |
 | 145. Frozen held-out test: square_digits, bowling, camel_case, PSB1 median, registered before implementing | 11_sections_121-125.md | 1269 |
 | 145r. Held-out: median 30/30 with and without pieces, random 0/30; the other three 0/30 in every arm; five of five predictions met | 11_sections_121-125.md | 1290 |
+| 146. PushGP baseline rerun measured and judged not feasible: 190-277 s per generation for fuel_cost, 16-22 h per non-solving run | 11_sections_121-125.md | 1312 |
