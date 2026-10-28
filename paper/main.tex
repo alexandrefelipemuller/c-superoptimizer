@@ -151,6 +151,36 @@ the input), one input array \texttt{arr} that also receives the output, a scratc
 A tree-walking interpreter runs a candidate on an input and returns the final array; a step limit turns a non-terminating loop into a
 timeout. Programs are abstract syntax trees, so the search can grow, mutate and recombine them without a syntactic validity problem.
 
+\subsection{Instances, Encoding and the Success Criterion}
+\label{sec:encoding}
+A problem is a set of \emph{instances}, each an input vector of integers and an expected output vector, plus a predicate that decides whether a final array is correct.
+The program never sees the expected output. The interpreter starts a run with the input copied into \texttt{arr}, the scalar \texttt{v0} equal to the length $n$ of the input, every other scalar
+(seven in all in our runs) at zero, and a scratch array \texttt{aux} of length $n$ filled with zeros. The program cannot resize \texttt{arr}; its \emph{output} is the contents of \texttt{arr} when it ends. A task whose answer is one number or a few
+numbers therefore writes the answer in the first cells and the predicate looks only at those: it compares the leading cells that the reference solution defines and ignores the rest, while the length of the array must be unchanged.
+A run counts as a failure on that case, with no partial credit from a run that fails to finish, when it reads or writes outside \texttt{arr} or \texttt{aux}, divides or takes a remainder by zero, overflows a 32-bit multiplication,
+shifts by an invalid amount, leaves a \texttt{break} outside a loop, or exceeds the step limit (20,000 interpreter steps per case); addition and subtraction are not checked.
+This makes the search space safe to sample, since random programs hit these errors constantly, and the errors are simply failures.
+
+\paragraph{Encodings of the seven PSB2 problems.} Each official case is a JSON line; we turn it into one input vector and one expected vector, and the reference solution of each problem is checked against every loaded case (Section~\ref{sec:protocol}).
+\begin{itemize}
+  \item Fuel Cost, Basement, Luhn: the input vector is \texttt{arr}; the answer is \texttt{arr[0]}. Paired Digits: the digit string is read as the vector of its digits; the answer is \texttt{arr[0]}.
+  \item GCD: \texttt{arr} holds the two integers; the answer is \texttt{arr[0]}.
+  \item Find Pair: \texttt{arr} is the vector followed by the target value; the answer is the first pair (by position) that sums to the target, in \texttt{arr[0]} and \texttt{arr[1]}.
+  \item Coin Sums: \texttt{arr} is four cells holding the amount and three zeros; the answer is the numbers of pennies, nickels, dimes and quarters in \texttt{arr[0..3]}.
+\end{itemize}
+The other problems of the transfer tests use encodings that we designed (for example a string as its character codes and a two-way answer as a negative code, Section~\ref{sec:protocol}); each is lossless but not the official format.
+
+\paragraph{Scoring and success.} A candidate is run on every training case. Its \emph{score} is the number of training cases solved exactly, as decided by the predicate; its \emph{partial score}, used only to break ties, is, for a case that runs to the end, the fraction of the leading answer cells that are right, summed over the cases (a case that fails to run gives zero). Neither the test cases nor the expected outputs of unseen cases are consulted for ranking.
+Under the PSB2 protocol, a run has 200 training cases and 2,000 unseen test cases from the same official dataset; a program that solves all 200 is a candidate solution, and the run counts as a success only if it also passes all 2,000 test cases.
+Outside PSB2, the same predicate is used with a stricter pipeline, described next.
+
+\paragraph{Two different sizes.} The \emph{program size} (number of AST nodes) grows by one at each step of the search, from 1 to a limit of 150 nodes; this is the axis that Section~\ref{sec:search} calls a size step.
+The \emph{difficulty level} $N$ belongs to the problem, not to the search: for the array problems of our own suite it is the length of the input array, and for problems about a number it indexes a range of magnitudes.
+The search starts at a small $N$, where the instance set is exhaustive whenever it is small enough, and moves to the next level when some program solves every instance of the current one; from then on it also keeps the first instances of every earlier level in the scoring set (a regression guard),
+so that a program that fits only the current level is not rewarded. A program that solves a level is run unchanged on the next levels, and it is labelled confirmed only if it keeps solving them over a lookahead window, passes the training and adversarial instances of another seed, and passes
+a final check on larger $N$, adversarial inputs (duplicates, negative or wide values) and exhaustive small inputs. The PSB2 runs of this paper do \emph{not} use levels: the training set is the same at every step (the 200 cases, whose lengths $n$ vary from case to case), the run has a single level (\texttt{-{}-max-n 1}), and the 2,000 test cases play the role of the adversarial set.
+The growth of $N$ therefore matters for the earlier results of our suite, not for any table of this paper.
+
 \subsection{Beam Search and Selection}
 A problem supplies instances at a difficulty level and a predicate that decides whether an output is correct. The search keeps the
 \texttt{beamWidth} best programs at the current size and builds the next generation from three sources: mutations of the beam,
