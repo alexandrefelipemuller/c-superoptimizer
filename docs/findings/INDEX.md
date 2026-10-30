@@ -273,3 +273,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 147r. Leave-one-out: term-expr, prefix-cross, pair-find, parity-term, sum-if each indispensable for its problem; radix redundant for paired_digits (30/30); no interaction seen; prediction 5 half failed | 11_sections_121-125.md | 1339 |
 | 147s. Clock check: the three Luhn seeds the beam lost at 900 s are solved at 392-447 s when alone with a 3000 s clock; random-control gap on Luhn was the clock | 11_sections_121-125.md | 1347 |
 | 147t. Audit after external review: Cut Vector degenerate in the dataset (125,000 of 125,491 inputs of length 1); official PSB1 Median data exist and were not used; McNemar check; layout fixes | 11_sections_121-125.md | 1351 |
+| 148. Median on the official PSB1 data files (beam on/off, random), registered before running | 11_sections_121-125.md | 1355 |
