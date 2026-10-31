@@ -275,3 +275,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 147t. Audit after external review: Cut Vector degenerate in the dataset (125,000 of 125,491 inputs of length 1); official PSB1 Median data exist and were not used; McNemar check; layout fixes | 11_sections_121-125.md | 1351 |
 | 148. Median on the official PSB1 data files (beam on/off, random), registered before running | 11_sections_121-125.md | 1355 |
 | 148r. Median on the official PSB1 files: beam on 30/30, off 29/30, random 0/30; same as on our generator, three of three predictions met | 11_sections_121-125.md | 1363 |
+| 149. Learning-curve experiment: 30-problem pool, random draw into 3 batches of 10, protocol and predictions registered before implementing any problem | 11_sections_121-125.md | 1367 |
