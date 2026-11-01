@@ -36,6 +36,7 @@ GenConfig combinatorOnly() {
     cfg.maxLoops = 2;
     cfg.loopAccumulatorBias = 0.0;
     cfg.combinatorBias = 1.0;
+    cfg.digitLoopBias = cfg.counterModBias = cfg.signedParityBias = 0.0;  // section 150 pieces draw RNG; keep these stream-sensitive tests as before
     return cfg;
 }
 
