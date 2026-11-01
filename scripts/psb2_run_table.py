@@ -8,8 +8,8 @@ D = sys.argv[1]
 OUT = sys.argv[2] if len(sys.argv) > 2 else None
 TRAIN = 200
 rows = []
-for log in sorted(glob.glob(f"{D}/psb[12]_*/seed_*.log")):
-    problem = os.path.basename(os.path.dirname(log))[5:].removesuffix("_heldout")
+for log in sorted(glob.glob(f"{D}/psb[12]_*/seed_*.log") + glob.glob(f"{D}/fresh_*/seed_*.log")):
+    problem = re.sub(r"^(psb[12]|fresh)_", "", os.path.basename(os.path.dirname(log))).removesuffix("_heldout")
     seed = int(re.search(r"seed_(\d+)\.log", log).group(1))
     text = open(log, errors="ignore").read()
     t = re.search(r"Search finished in ([0-9.]+)s", text)

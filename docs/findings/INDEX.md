@@ -276,3 +276,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 148. Median on the official PSB1 data files (beam on/off, random), registered before running | 11_sections_121-125.md | 1355 |
 | 148r. Median on the official PSB1 files: beam on 30/30, off 29/30, random 0/30; same as on our generator, three of three predictions met | 11_sections_121-125.md | 1363 |
 | 149. Learning-curve experiment: 30-problem pool, random draw into 3 batches of 10, protocol and predictions registered before implementing any problem | 11_sections_121-125.md | 1367 |
+| 149r. Batch 1 of the learning curve: beam solves 3 of 10 (8, 3, 2 of 30 runs), random 0, pieces off 3; scalar loops 0 of 30; prediction 3 failed, 5 half failed | 11_sections_121-125.md | 1397 |
