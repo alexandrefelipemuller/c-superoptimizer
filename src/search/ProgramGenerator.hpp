@@ -188,6 +188,12 @@ struct GenConfig {
     // block is the mixed-radix decomposition of arr[0]. 0 = off, no RNG draw.
     double sumIfBias = 0.05;  // default since section 131
     double radixBias = 0.03;  // default since section 131
+    // Section 150: probability that a combinator block is a digit loop (acc = sum of the base-c digits of arr[0]), a counter
+    // loop that sums or counts the counter values passing a modulus test (i % c1 == 0, optionally or i % c2 == 0), and a
+    // parity-signed sum (+arr[i] on positions of one parity, -arr[i] on the others). 0 = off, no RNG draw, byte-identical.
+    double digitLoopBias = 0.03;
+    double counterModBias = 0.03;
+    double signedParityBias = 0.03;
     // Section 137 (opt-in): probability that a single-loop CountIf tests a small arithmetic term of the element
     // (x % c, x / c, x * c, x +- c, ...) against the key instead of the raw element, and that a scalar-loop Fold
     // accumulates the square of its counter (a = a op i * i). 0 = off, no RNG draw, byte-identical.

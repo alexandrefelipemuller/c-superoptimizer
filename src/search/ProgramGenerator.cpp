@@ -1891,6 +1891,89 @@ StmtPtr genRadixBlock(Random& rng, const GenConfig& cfg, int& loopsUsed) {
     return block;
 }
 
+// Section 150: digit loop. x = arr[0]; acc = 0; while (x > 0) { acc = acc + x % c; x = x / c; } arr[0] = acc, with the base c
+// drawn in 2..10 (decimal digit sum, population count, ...).
+StmtPtr genDigitLoopBlock(Random& rng, const GenConfig& cfg, int& loopsUsed) {
+    std::vector<int> v = pickDistinctVars(rng, cfg, 2);
+    int x = v[0], acc = v[1];
+    int c = rng.uniformInt(2, 10);
+    std::vector<StmtPtr> root;
+    root.push_back(makeAssign(x, makeArrayAccess(makeIntConst(0))));
+    root.push_back(makeAssign(acc, makeIntConst(0)));
+    std::vector<StmtPtr> body;
+    body.push_back(makeAssign(acc, makeBinOp(ExprKind::Add, makeVar(acc), makeBinOp(ExprKind::Mod, makeVar(x), makeIntConst(c)))));
+    body.push_back(makeAssign(x, makeBinOp(ExprKind::Div, makeVar(x), makeIntConst(c))));
+    loopsUsed++;
+    root.push_back(makeWhile(makeCompare(ExprKind::Gt, makeVar(x), makeIntConst(0)), std::move(body)));
+    root.push_back(makeAssignArray(makeIntConst(0), makeVar(acc)));
+    auto block = makeBlock();
+    block->body = std::move(root);
+    return block;
+}
+
+// Section 150: counter loop with a modulus test. acc = 0; i = start; while (i < arr[0] (or <= )) {
+//   if (i % c1 == 0) { acc = acc + t } [else if (i % c2 == 0) { acc = acc + t }]; i = i + 1 }  arr[0] = acc,
+// with start in {0, 1}, c1 (and c2) in 2..9, t = i (70%) or 1 (30%).
+StmtPtr genCounterModBlock(Random& rng, const GenConfig& cfg, int& loopsUsed) {
+    std::vector<int> v = pickDistinctVars(rng, cfg, 2);
+    int i = v[0], acc = v[1];
+    int c1 = rng.uniformInt(2, 9);
+    bool second = rng.chance(0.5);
+    int c2 = rng.uniformInt(2, 9);
+    if (c2 == c1) c2 = c1 == 9 ? 2 : c1 + 1;
+    bool inclusive = rng.chance(0.25);
+    bool addCounter = rng.chance(0.7);
+    auto term = [&] { return addCounter ? makeVar(i) : makeIntConst(1); };
+    auto addTo = [&] {
+        std::vector<StmtPtr> st;
+        st.push_back(makeAssign(acc, makeBinOp(ExprKind::Add, makeVar(acc), term())));
+        return st;
+    };
+    auto test = [&](int c) {
+        return makeCompare(ExprKind::Eq, makeBinOp(ExprKind::Mod, makeVar(i), makeIntConst(c)), makeIntConst(0));
+    };
+    std::vector<StmtPtr> root;
+    root.push_back(makeAssign(acc, makeIntConst(0)));
+    root.push_back(makeAssign(i, makeIntConst(rng.uniformInt(0, 1))));
+    ExprPtr bound = makeArrayAccess(makeIntConst(0));
+    if (inclusive) bound = makeBinOp(ExprKind::Add, std::move(bound), makeIntConst(1));
+    appendCountingWhile(root, i, std::move(bound), loopsUsed, [&](std::vector<StmtPtr>& body) {
+        if (second) {
+            std::vector<StmtPtr> inner;
+            inner.push_back(makeIf(test(c2), addTo()));
+            body.push_back(makeIf(test(c1), addTo(), std::move(inner)));
+        } else {
+            body.push_back(makeIf(test(c1), addTo()));
+        }
+    });
+    root.push_back(makeAssignArray(makeIntConst(0), makeVar(acc)));
+    auto block = makeBlock();
+    block->body = std::move(root);
+    return block;
+}
+
+// Section 150: parity-signed sum. acc = 0; i = 0; while (i < n) { if (i % 2 == p) acc = acc + arr[i] else acc = acc - arr[i]; }
+// arr[0] = acc, p in {0, 1}.
+StmtPtr genSignedParityBlock(Random& rng, const GenConfig& cfg, int& loopsUsed) {
+    std::vector<int> v = pickDistinctVars(rng, cfg, 2);
+    int i = v[0], acc = v[1];
+    int p = rng.uniformInt(0, 1);
+    std::vector<StmtPtr> root;
+    root.push_back(makeAssign(acc, makeIntConst(0)));
+    root.push_back(makeAssign(i, makeIntConst(0)));
+    appendCountingWhile(root, i, makeVar(0), loopsUsed, [&](std::vector<StmtPtr>& body) {
+        std::vector<StmtPtr> plus, minus;
+        plus.push_back(makeAssign(acc, makeBinOp(ExprKind::Add, makeVar(acc), makeArrayAccess(makeVar(i)))));
+        minus.push_back(makeAssign(acc, makeBinOp(ExprKind::Sub, makeVar(acc), makeArrayAccess(makeVar(i)))));
+        body.push_back(makeIf(makeCompare(ExprKind::Eq, makeBinOp(ExprKind::Mod, makeVar(i), makeIntConst(2)), makeIntConst(p)),
+                              std::move(plus), std::move(minus)));
+    });
+    root.push_back(makeAssignArray(makeIntConst(0), makeVar(acc)));
+    auto block = makeBlock();
+    block->body = std::move(root);
+    return block;
+}
+
 // Section 130: first pair (i < j) of elements whose sum (or difference) equals a target, output as two cells.
 // The target is the last element (pairs over arr[0..n-2]) or the first (pairs over arr[1..n-1]); the pair is output as
 // the two values or as the two indices, in arr[0] and arr[1]. Generic "find the pair that hits a target" search.
@@ -2084,6 +2167,15 @@ StmtPtr genCombinatorBlock(Random& rng, const GenConfig& cfg, int& loopsUsed) {
         return genPositionalSumBlock(rng, cfg, loopsUsed);
     }
     if (cfg.radixBias > 0.0 && rng.chance(cfg.radixBias)) return genRadixBlock(rng, cfg, loopsUsed);
+    if (cfg.digitLoopBias > 0.0 && (cfg.maxLoops - loopsUsed) >= 1 && rng.chance(cfg.digitLoopBias)) {
+        return genDigitLoopBlock(rng, cfg, loopsUsed);
+    }
+    if (cfg.counterModBias > 0.0 && (cfg.maxLoops - loopsUsed) >= 1 && rng.chance(cfg.counterModBias)) {
+        return genCounterModBlock(rng, cfg, loopsUsed);
+    }
+    if (cfg.signedParityBias > 0.0 && (cfg.maxLoops - loopsUsed) >= 1 && rng.chance(cfg.signedParityBias)) {
+        return genSignedParityBlock(rng, cfg, loopsUsed);
+    }
     if (cfg.pairFindBias > 0.0 && (cfg.maxLoops - loopsUsed) >= 2 && rng.chance(cfg.pairFindBias)) {
         return genPairFindBlock(rng, cfg, loopsUsed);
     }

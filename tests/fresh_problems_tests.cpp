@@ -3,6 +3,7 @@
 #include "core/Random.hpp"
 #include "interpreter/Interpreter.hpp"
 #include "problems/FreshProblem.hpp"
+#include "search/ProgramGenerator.hpp"
 #include "test_framework.hpp"
 
 using namespace algosearch;
@@ -124,4 +125,27 @@ TEST(fresh_unsolved_batch_1_problems_have_known_solutions_within_the_grammar) {
         for (const Instance& inst : prob.generateInstances(1)) CHECK(prob.evaluate(*p.prog, inst, interp).status == ExecStatus::SUCCESS);
         for (const Instance& inst : prob.generateAdversarialInstances(1)) CHECK(prob.evaluate(*p.prog, inst, interp).status == ExecStatus::SUCCESS);
     }
+}
+
+TEST(section_150_pieces_are_byte_identical_when_off_and_change_programs_when_on) {
+    GenConfig off;
+    off.numVars = 8;
+    off.combinatorBias = 1.0;
+    off.digitLoopBias = off.counterModBias = off.signedParityBias = 0.0;
+    GenConfig on = off;
+    on.digitLoopBias = 1.0;
+    auto text = [&](const GenConfig& cfg) {
+        Random rng(7);
+        std::string all;
+        for (int i = 0; i < 40; ++i) all += generateRandomProgram(rng, 30, cfg)->toString();
+        return all;
+    };
+    CHECK(text(off) == text(off));
+    CHECK(text(on) != text(off));
+    GenConfig counter = off;
+    counter.counterModBias = 1.0;
+    GenConfig signedSum = off;
+    signedSum.signedParityBias = 1.0;
+    CHECK(text(counter) != text(off));
+    CHECK(text(signedSum) != text(off));
 }
