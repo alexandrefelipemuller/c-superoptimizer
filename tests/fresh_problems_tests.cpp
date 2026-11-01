@@ -149,3 +149,44 @@ TEST(section_150_pieces_are_byte_identical_when_off_and_change_programs_when_on)
     CHECK(text(counter) != text(off));
     CHECK(text(signedSum) != text(off));
 }
+
+TEST(fresh_batch_2_references_match_hand_computed_values) {
+    using K = FreshProblem::Kind;
+    auto tr = FreshProblem::reference(K::MatrixTranspose, {1, 2, 3, 4});
+    CHECK_EQ(tr[1], 3);
+    CHECK_EQ(tr[2], 2);
+    auto tr3 = FreshProblem::reference(K::MatrixTranspose, {1, 2, 3, 4, 5, 6, 7, 8, 9});
+    CHECK_EQ(tr3[1], 4);
+    CHECK_EQ(tr3[3], 2);
+    CHECK_EQ(tr3[5], 8);
+    CHECK_EQ(FreshProblem::reference(K::BinaryToDecimal, {1, 0, 1, 1})[0], 11);
+    CHECK_EQ(FreshProblem::reference(K::RangeMaxMin, {3, -4, 9})[0], 13);
+    auto ad = FreshProblem::reference(K::AdjacentDifferences, {5, 7, 4});
+    CHECK_EQ(ad[0], 5);
+    CHECK_EQ(ad[1], 2);
+    CHECK_EQ(ad[2], -3);
+    CHECK_EQ(FreshProblem::reference(K::Lcm, {4, 6})[0], 12);
+    CHECK_EQ(FreshProblem::reference(K::Lcm, {7, 1})[0], 7);
+    CHECK_EQ(FreshProblem::reference(K::MaxNonAdjacentSum, {5, 1, 1, 5})[0], 10);
+    CHECK_EQ(FreshProblem::reference(K::MaxNonAdjacentSum, {2})[0], 2);
+    CHECK_EQ(FreshProblem::reference(K::Isqrt, {0})[0], 0);
+    CHECK_EQ(FreshProblem::reference(K::Isqrt, {24})[0], 4);
+    CHECK_EQ(FreshProblem::reference(K::Isqrt, {25})[0], 5);
+    CHECK_EQ(FreshProblem::reference(K::CountDivisors, {12})[0], 6);
+    CHECK_EQ(FreshProblem::reference(K::CountDivisors, {1})[0], 1);
+    CHECK_EQ(FreshProblem::reference(K::KthSmallest, {2, 9, 3, 3, 7})[0], 3);
+    CHECK_EQ(FreshProblem::reference(K::KthSmallest, {3, 9, 3, 3, 7})[0], 7);
+    CHECK_EQ(FreshProblem::reference(K::Josephus, {7, 3})[0], 4);
+    CHECK_EQ(FreshProblem::reference(K::Josephus, {1, 5})[0], 1);
+}
+
+TEST(fresh_batch_2_builds_train_and_test_sets_that_its_references_solve) {
+    using K = FreshProblem::Kind;
+    for (K k : {K::MatrixTranspose, K::BinaryToDecimal, K::RangeMaxMin, K::AdjacentDifferences, K::Lcm, K::MaxNonAdjacentSum,
+                K::Isqrt, K::CountDivisors, K::KthSmallest, K::Josephus}) {
+        FreshProblem p(k, 7, 1);
+        CHECK_EQ(p.generateInstances(1).size(), static_cast<size_t>(200));
+        CHECK_EQ(p.generateAdversarialInstances(1).size(), static_cast<size_t>(2000));
+        for (const Instance& inst : p.generateAdversarialInstances(1)) CHECK(p.isSolution(inst.input, inst.expectedOutput));
+    }
+}

@@ -27,11 +27,25 @@ namespace algosearch {
 //   swap_adjacent_pairs: arr = 1..8 items in [-20, 20]; items (0,1), (2,3), ... are swapped; a last odd item stays.
 //   count_pairs_with_sum: arr = {key, a_1 .. a_m}, key in [-10, 10], m in 2..8, items in [-5, 5]; arr[0] = the number of
 //     pairs i < j with a_i + a_j = key.
+// Batch 2 (section 150):
+//   matrix_transpose: arr = n*n items (n in 2..3) in [-20, 20]; the output is the transposed matrix in place (row-major).
+//   binary_to_decimal: arr = 1..8 bits, most significant first; arr[0] = the value.
+//   range_max_min: arr = 1..8 items in [-20, 20]; arr[0] = max - min.
+//   adjacent_differences: arr = 1..8 items in [-20, 20]; in place a_i := a_i - a_(i-1) for i >= 1, a_0 unchanged.
+//   lcm: arr = {a, b}, 1..30; arr[0] = the least common multiple.
+//   max_non_adjacent_sum: arr = 1..8 items in [0, 20]; arr[0] = the largest sum of items no two of which are adjacent.
+//   isqrt: arr = {n}, n in 0..200; arr[0] = floor(sqrt(n)).
+//   count_divisors: arr = {n}, n in 1..100; arr[0] = the number of divisors of n.
+//   kth_smallest: arr = {k, a_1 .. a_m}, m in 1..8, items in [-20, 20], k in 1..m; arr[0] = the k-th smallest item.
+//   josephus: arr = {n, k}, n in 1..12, k in 1..5; arr[0] = the 1-based survivor of the Josephus problem.
 class FreshProblem : public Problem {
 public:
     enum class Kind {
         SumMultiples3Or5, Binomial, DigitSum, CumulativeMax, Popcount, AlternatingSum, IsPowerOfTwo,
-        BalancedParentheses, SwapAdjacentPairs, CountPairsWithSum
+        BalancedParentheses, SwapAdjacentPairs, CountPairsWithSum,
+        // Batch 2 (section 150; encodings fixed before implementation)
+        MatrixTranspose, BinaryToDecimal, RangeMaxMin, AdjacentDifferences, Lcm, MaxNonAdjacentSum, Isqrt, CountDivisors,
+        KthSmallest, Josephus
     };
 
     FreshProblem(Kind kind, int numVars, uint64_t seed);

@@ -28,6 +28,16 @@ std::string FreshProblem::name(Kind kind) {
         case Kind::BalancedParentheses: return "balanced_parentheses";
         case Kind::SwapAdjacentPairs: return "swap_adjacent_pairs";
         case Kind::CountPairsWithSum: return "count_pairs_with_sum";
+        case Kind::MatrixTranspose: return "matrix_transpose";
+        case Kind::BinaryToDecimal: return "binary_to_decimal";
+        case Kind::RangeMaxMin: return "range_max_min";
+        case Kind::AdjacentDifferences: return "adjacent_differences";
+        case Kind::Lcm: return "lcm";
+        case Kind::MaxNonAdjacentSum: return "max_non_adjacent_sum";
+        case Kind::Isqrt: return "isqrt";
+        case Kind::CountDivisors: return "count_divisors";
+        case Kind::KthSmallest: return "kth_smallest";
+        case Kind::Josephus: return "josephus";
     }
     return "";
 }
@@ -99,6 +109,71 @@ std::vector<int> FreshProblem::reference(Kind kind, const std::vector<int>& arr)
             }
             return {count};
         }
+        case Kind::MatrixTranspose: {
+            size_t n = 0;
+            while ((n + 1) * (n + 1) <= arr.size()) ++n;
+            std::vector<int> out = arr;
+            for (size_t i = 0; i < n; ++i) {
+                for (size_t j = 0; j < n; ++j) out[i * n + j] = arr[j * n + i];
+            }
+            return out;
+        }
+        case Kind::BinaryToDecimal: {
+            int value = 0;
+            for (int bit : arr) value = value * 2 + bit;
+            return {value};
+        }
+        case Kind::RangeMaxMin: {
+            if (arr.empty()) return {0};
+            return {*std::max_element(arr.begin(), arr.end()) - *std::min_element(arr.begin(), arr.end())};
+        }
+        case Kind::AdjacentDifferences: {
+            std::vector<int> out = arr;
+            for (size_t i = 1; i < out.size(); ++i) out[i] = arr[i] - arr[i - 1];
+            return out;
+        }
+        case Kind::Lcm: {
+            if (arr.size() < 2 || arr[0] <= 0 || arr[1] <= 0) return {0};
+            int a = arr[0], b = arr[1];
+            while (b != 0) {
+                int t = a % b;
+                a = b;
+                b = t;
+            }
+            return {arr[0] / a * arr[1]};
+        }
+        case Kind::MaxNonAdjacentSum: {
+            int take = 0, skip = 0;
+            for (int x : arr) {
+                int newTake = skip + x;
+                skip = std::max(skip, take);
+                take = newTake;
+            }
+            return {std::max(take, skip)};
+        }
+        case Kind::Isqrt: {
+            int n = arr.empty() ? 0 : arr[0], r = 0;
+            while ((r + 1) * (r + 1) <= n) ++r;
+            return {r};
+        }
+        case Kind::CountDivisors: {
+            int n = arr.empty() ? 0 : arr[0], count = 0;
+            for (int d = 1; d <= n; ++d) count += n % d == 0;
+            return {count};
+        }
+        case Kind::KthSmallest: {
+            if (arr.size() < 2) return {0};
+            std::vector<int> items(arr.begin() + 1, arr.end());
+            std::sort(items.begin(), items.end());
+            size_t k = static_cast<size_t>(std::max(1, std::min(arr[0], static_cast<int>(items.size()))));
+            return {items[k - 1]};
+        }
+        case Kind::Josephus: {
+            if (arr.size() < 2) return {0};
+            int survivor = 0;
+            for (int i = 2; i <= arr[0]; ++i) survivor = (survivor + arr[1]) % i;
+            return {survivor + 1};
+        }
     }
     return {0};
 }
@@ -140,6 +215,23 @@ std::vector<int> FreshProblem::randomInput(Kind kind, Random& rng) {
             v.insert(v.begin(), rng.uniformInt(-10, 10));
             return v;
         }
+        case Kind::MatrixTranspose: {
+            int n = rng.uniformInt(2, 3);
+            return randomVector(rng, n * n, n * n, -20, 20);
+        }
+        case Kind::BinaryToDecimal: return randomVector(rng, 1, 8, 0, 1);
+        case Kind::RangeMaxMin:
+        case Kind::AdjacentDifferences: return randomVector(rng, 1, 8, -20, 20);
+        case Kind::Lcm: return {rng.uniformInt(1, 30), rng.uniformInt(1, 30)};
+        case Kind::MaxNonAdjacentSum: return randomVector(rng, 1, 8, 0, 20);
+        case Kind::Isqrt: return {rng.uniformInt(0, 200)};
+        case Kind::CountDivisors: return {rng.uniformInt(1, 100)};
+        case Kind::KthSmallest: {
+            std::vector<int> v = randomVector(rng, 1, 8, -20, 20);
+            v.insert(v.begin(), rng.uniformInt(1, static_cast<int>(v.size())));
+            return v;
+        }
+        case Kind::Josephus: return {rng.uniformInt(1, 12), rng.uniformInt(1, 5)};
     }
     return {0};
 }
