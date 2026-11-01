@@ -279,3 +279,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 149r. Batch 1 of the learning curve: beam solves 3 of 10 (8, 3, 2 of 30 runs), random 0, pieces off 3; scalar loops 0 of 30; prediction 3 failed, 5 half failed | 11_sections_121-125.md | 1397 |
 | 149c. Batch 1: the seven unsolved problems all have known solutions (23-41 nodes); six are missing pieces, balanced_parentheses also has an under-determined training set | 11_sections_121-125.md | 1414 |
 | 150. Three generator pieces after batch 1 (digit loop, counter with modulus test, parity-signed sum); batch 2 predictions and encodings registered before implementing it | 11_sections_121-125.md | 1431 |
+| 150r. Batch 2 of the learning curve: beam solves 6 of 10 (M1 3 -> 6, a rise by the rule); predictions 1, 4, 5 failed | 11_sections_121-125.md | 1460 |
