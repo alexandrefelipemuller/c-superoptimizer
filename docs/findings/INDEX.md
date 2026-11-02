@@ -285,3 +285,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 151r. Batch 3 of the learning curve: beam solves 3 of 10 (M1 3, 6, 3: not monotone); predictions 1, 2, 3 failed, 5 half failed | 11_sections_121-125.md | 1487 |
 | 152. Diagnosis after the learning curve: literals limited to 0..3; --max-const test, predictions registered before the run; corrects the error-share figure | 11_sections_121-125.md | 1495 |
 | 152r. --max-const 10 does not solve digital_root (1 of 20; prediction failed); the search plateaus at the score of n % 9 (177 of 200); budget 20000/size does not move it | 11_sections_121-125.md | 1503 |
+| 153. Per-case (lexicase) selection: new flag --lexicase-rate, design and four predictions registered before the run | 11_sections_121-125.md | 1511 |

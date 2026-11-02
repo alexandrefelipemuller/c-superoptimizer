@@ -597,7 +597,7 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
         if (threadCount == 0) threadCount = 1;
 
         bool debugLandscape = std::getenv("ALGOSEARCH_DEBUG_LANDSCAPE") != nullptr;
-        bool trackCorrectness = config_.behaviorNicheRate > 0.0 || debugLandscape;
+        bool trackCorrectness = config_.behaviorNicheRate > 0.0 || config_.lexicaseRate > 0.0 || debugLandscape;
         bool debugBehavior = std::getenv("ALGOSEARCH_DEBUG_BEHAVIOR") != nullptr;
         auto scoreStart = std::chrono::steady_clock::now();
         std::vector<CandidateRecord> scored(grownPool.size() + freshPool.size() + crossoverPool.size());
@@ -790,7 +790,12 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
             behaviorNicheCount = static_cast<int>(std::lround(config_.behaviorNicheRate * config_.beamWidth));
             behaviorNicheCount = std::clamp(behaviorNicheCount, 0, eliteCount - shapeNicheCount);
         }
-        int nicheCount = shapeNicheCount + behaviorNicheCount;
+        int lexicaseCount = 0;
+        if (config_.lexicaseRate > 0.0) {
+            lexicaseCount = static_cast<int>(std::lround(config_.lexicaseRate * config_.beamWidth));
+            lexicaseCount = std::clamp(lexicaseCount, 0, eliteCount - shapeNicheCount - behaviorNicheCount);
+        }
+        int nicheCount = shapeNicheCount + behaviorNicheCount + lexicaseCount;
         int pureEliteCount = eliteCount - nicheCount;
 
         if (nicheCount > 0 && static_cast<int>(scored.size()) > pureEliteCount) {
@@ -833,6 +838,41 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
                     if (behaviorsInBeam.insert(behavior).second) {
                         nextBeam.push_back(std::move(scored[i]));
                     }
+                }
+            }
+
+            // Section 153: lexicase slots. The pool is every candidate the earlier passes left in `scored`.
+            if (lexicaseCount > 0) {
+                std::vector<size_t> pool;
+                for (size_t i = 0; i < scored.size(); ++i) {
+                    if (scored[i].program && !scored[i].correctness.empty()) pool.push_back(i);
+                }
+                size_t numCases = pool.empty() ? 0 : scored[pool.front()].correctness.size();
+                std::vector<size_t> caseOrder(numCases);
+                for (size_t c = 0; c < numCases; ++c) caseOrder[c] = c;
+                int lexTarget = pureEliteCount + shapeNicheCount + behaviorNicheCount + lexicaseCount;
+                std::vector<size_t> live;
+                while (static_cast<int>(nextBeam.size()) < lexTarget && !pool.empty()) {
+                    for (size_t c = numCases; c > 1; --c) {
+                        std::swap(caseOrder[c - 1], caseOrder[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(c) - 1))]);
+                    }
+                    live = pool;
+                    for (size_t k = 0; k < numCases && live.size() > 1; ++k) {
+                        size_t c = caseOrder[k];
+                        bool any = false;
+                        for (size_t i : live) {
+                            if (scored[i].correctness[c]) { any = true; break; }
+                        }
+                        if (!any) continue;
+                        size_t keep = 0;
+                        for (size_t i : live) {
+                            if (scored[i].correctness[c]) live[keep++] = i;
+                        }
+                        live.resize(keep);
+                    }
+                    size_t chosen = live[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(live.size()) - 1))];
+                    nextBeam.push_back(std::move(scored[chosen]));
+                    pool.erase(std::find(pool.begin(), pool.end(), chosen));
                 }
             }
 

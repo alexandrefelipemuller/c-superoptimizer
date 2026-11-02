@@ -117,6 +117,14 @@ struct SearchConfig {
     // prior behavior exactly.
     double behaviorNicheRate = 0.0;
 
+    // Section 153: per-case (lexicase) selection. Reserves `lexicaseRate * beamWidth` slots, filled from the
+    // candidates NOT kept by the elite core: each slot is one lexicase draw (cases in random order; keep only the
+    // candidates that solve the case when any does; stop at one candidate), without replacement. Unlike a niche, which
+    // scans the ranking in score order, a candidate that solves only the few cases everyone else fails is selected
+    // with a probability that does not depend on its total score. Needs the per-case correctness vector. 0.0
+    // (default) disables it and reproduces prior behavior exactly.
+    double lexicaseRate = 0.0;
+
     // Speed-aware fitness tie-break (data/skeleton_middle_ground_experiments.md,
     // "Tests 2 and 4" follow-up hypothesis): `score` (exact-correctness
     // count, used for promotion/labeling) is NEVER affected by this -- it
