@@ -283,3 +283,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 150s. Batch 2: the four unsolved problems (adjacent_differences, lcm, josephus, matrix_transpose) have known solutions in the grammar (test) | 11_sections_121-125.md | 1468 |
 | 151. Batch 3 of the learning curve: encodings and seven predictions registered before implementing it; library stays frozen at e118572 | 11_sections_121-125.md | 1472 |
 | 151r. Batch 3 of the learning curve: beam solves 3 of 10 (M1 3, 6, 3: not monotone); predictions 1, 2, 3 failed, 5 half failed | 11_sections_121-125.md | 1487 |
+| 152. Diagnosis after the learning curve: literals limited to 0..3; --max-const test, predictions registered before the run; corrects the error-share figure | 11_sections_121-125.md | 1495 |
