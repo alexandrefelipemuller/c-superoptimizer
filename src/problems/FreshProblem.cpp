@@ -38,6 +38,16 @@ std::string FreshProblem::name(Kind kind) {
         case Kind::CountDivisors: return "count_divisors";
         case Kind::KthSmallest: return "kth_smallest";
         case Kind::Josephus: return "josephus";
+        case Kind::MatrixDiagonalSum: return "matrix_diagonal_sum";
+        case Kind::IsPerfectNumber: return "is_perfect_number";
+        case Kind::ReverseNumber: return "reverse_number";
+        case Kind::DotProductHalves: return "dot_product_halves";
+        case Kind::DigitalRoot: return "digital_root";
+        case Kind::PalindromeNumber: return "palindrome_number";
+        case Kind::RotateLeftByK: return "rotate_left_by_k";
+        case Kind::PrefixSums: return "prefix_sums";
+        case Kind::TriangularIndex: return "triangular_index";
+        case Kind::FactorialTrailingZeros: return "factorial_trailing_zeros";
     }
     return "";
 }
@@ -174,6 +184,62 @@ std::vector<int> FreshProblem::reference(Kind kind, const std::vector<int>& arr)
             for (int i = 2; i <= arr[0]; ++i) survivor = (survivor + arr[1]) % i;
             return {survivor + 1};
         }
+        case Kind::MatrixDiagonalSum: {
+            size_t n = 0;
+            while ((n + 1) * (n + 1) <= arr.size()) ++n;
+            int sum = 0;
+            for (size_t i = 0; i < n; ++i) sum += arr[i * n + i];
+            return {sum};
+        }
+        case Kind::IsPerfectNumber: {
+            int n = arr.empty() ? 0 : arr[0], sum = 0;
+            for (int d = 1; d < n; ++d) {
+                if (n % d == 0) sum += d;
+            }
+            return {n > 0 && sum == n ? 1 : 0};
+        }
+        case Kind::ReverseNumber: {
+            int n = arr.empty() ? 0 : arr[0], r = 0;
+            for (; n > 0; n /= 10) r = r * 10 + n % 10;
+            return {r};
+        }
+        case Kind::DotProductHalves: {
+            size_t m = arr.size() / 2;
+            int sum = 0;
+            for (size_t i = 0; i < m; ++i) sum += arr[i] * arr[m + i];
+            return {sum};
+        }
+        case Kind::DigitalRoot: {
+            int n = arr.empty() ? 0 : arr[0];
+            return {n <= 0 ? 0 : (n - 1) % 9 + 1};
+        }
+        case Kind::PalindromeNumber: {
+            int n = arr.empty() ? 0 : arr[0], r = 0;
+            for (int t = n; t > 0; t /= 10) r = r * 10 + t % 10;
+            return {r == n ? 1 : 0};
+        }
+        case Kind::RotateLeftByK: {
+            if (arr.size() < 2) return arr;
+            std::vector<int> out = arr;
+            int m = static_cast<int>(arr.size()) - 1, k = arr[0] % m;
+            for (int i = 0; i < m; ++i) out[1 + i] = arr[1 + (i + k) % m];
+            return out;
+        }
+        case Kind::PrefixSums: {
+            std::vector<int> out = arr;
+            for (size_t i = 1; i < out.size(); ++i) out[i] = out[i - 1] + arr[i];
+            return out;
+        }
+        case Kind::TriangularIndex: {
+            int n = arr.empty() ? 0 : arr[0], k = 0;
+            while (k * (k + 1) / 2 < n) ++k;
+            return {k};
+        }
+        case Kind::FactorialTrailingZeros: {
+            int n = arr.empty() ? 0 : arr[0], zeros = 0;
+            for (int p = 5; p <= n; p *= 5) zeros += n / p;
+            return {zeros};
+        }
     }
     return {0};
 }
@@ -232,6 +298,40 @@ std::vector<int> FreshProblem::randomInput(Kind kind, Random& rng) {
             return v;
         }
         case Kind::Josephus: return {rng.uniformInt(1, 12), rng.uniformInt(1, 5)};
+        case Kind::MatrixDiagonalSum: {
+            int n = rng.uniformInt(2, 3);
+            return randomVector(rng, n * n, n * n, -20, 20);
+        }
+        case Kind::IsPerfectNumber: {
+            if (rng.uniformInt(0, 9) < 3) {
+                static const int perfect[3] = {6, 28, 496};
+                return {perfect[rng.uniformInt(0, 2)]};
+            }
+            return {rng.uniformInt(1, 500)};
+        }
+        case Kind::ReverseNumber: return {rng.uniformInt(1, 9999)};
+        case Kind::DotProductHalves: {
+            int m = rng.uniformInt(1, 4);
+            return randomVector(rng, 2 * m, 2 * m, -9, 9);
+        }
+        case Kind::DigitalRoot: return {rng.uniformInt(1, 99999)};
+        case Kind::PalindromeNumber: {
+            if (rng.uniformInt(0, 1) == 0) {
+                int half = rng.uniformInt(1, 99), n = half;
+                int digits = rng.uniformInt(0, 1);  // 0: even length, 1: odd length (middle digit shared)
+                for (int t = digits == 1 ? half / 10 : half; t > 0; t /= 10) n = n * 10 + t % 10;
+                return {n};
+            }
+            return {rng.uniformInt(1, 9999)};
+        }
+        case Kind::RotateLeftByK: {
+            std::vector<int> v = randomVector(rng, 2, 7, -20, 20);
+            v.insert(v.begin(), rng.uniformInt(0, static_cast<int>(v.size()) - 1));
+            return v;
+        }
+        case Kind::PrefixSums: return randomVector(rng, 1, 8, -20, 20);
+        case Kind::TriangularIndex: return {rng.uniformInt(1, 100)};
+        case Kind::FactorialTrailingZeros: return {rng.uniformInt(1, 200)};
     }
     return {0};
 }

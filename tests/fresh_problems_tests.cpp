@@ -228,3 +228,113 @@ TEST(fresh_unsolved_batch_2_problems_have_known_solutions_within_the_grammar) {
         for (const Instance& inst : prob.generateAdversarialInstances(1)) CHECK(prob.evaluate(*p.prog, inst, interp).status == ExecStatus::SUCCESS);
     }
 }
+
+TEST(fresh_batch_3_references_match_hand_computed_values) {
+    using K = FreshProblem::Kind;
+    CHECK_EQ(FreshProblem::reference(K::MatrixDiagonalSum, {1, 2, 3, 4})[0], 5);
+    CHECK_EQ(FreshProblem::reference(K::MatrixDiagonalSum, {1, 2, 3, 4, 5, 6, 7, 8, 9})[0], 15);
+    CHECK_EQ(FreshProblem::reference(K::IsPerfectNumber, {6})[0], 1);
+    CHECK_EQ(FreshProblem::reference(K::IsPerfectNumber, {28})[0], 1);
+    CHECK_EQ(FreshProblem::reference(K::IsPerfectNumber, {496})[0], 1);
+    CHECK_EQ(FreshProblem::reference(K::IsPerfectNumber, {12})[0], 0);
+    CHECK_EQ(FreshProblem::reference(K::IsPerfectNumber, {1})[0], 0);
+    CHECK_EQ(FreshProblem::reference(K::ReverseNumber, {1200})[0], 21);
+    CHECK_EQ(FreshProblem::reference(K::ReverseNumber, {9})[0], 9);
+    CHECK_EQ(FreshProblem::reference(K::DotProductHalves, {1, 2, 3, 4})[0], 3 + 8);
+    CHECK_EQ(FreshProblem::reference(K::DotProductHalves, {5, -2})[0], -10);
+    CHECK_EQ(FreshProblem::reference(K::DigitalRoot, {99999})[0], 9);
+    CHECK_EQ(FreshProblem::reference(K::DigitalRoot, {38})[0], 2);
+    CHECK_EQ(FreshProblem::reference(K::DigitalRoot, {10})[0], 1);
+    CHECK_EQ(FreshProblem::reference(K::PalindromeNumber, {1221})[0], 1);
+    CHECK_EQ(FreshProblem::reference(K::PalindromeNumber, {121})[0], 1);
+    CHECK_EQ(FreshProblem::reference(K::PalindromeNumber, {120})[0], 0);
+    CHECK_EQ(FreshProblem::reference(K::PalindromeNumber, {7})[0], 1);
+    auto rot = FreshProblem::reference(K::RotateLeftByK, {1, 10, 20, 30});
+    CHECK_EQ(rot[0], 1);
+    CHECK_EQ(rot[1], 20);
+    CHECK_EQ(rot[2], 30);
+    CHECK_EQ(rot[3], 10);
+    auto rot0 = FreshProblem::reference(K::RotateLeftByK, {0, 10, 20});
+    CHECK_EQ(rot0[1], 10);
+    auto ps = FreshProblem::reference(K::PrefixSums, {3, -1, 4});
+    CHECK_EQ(ps[0], 3);
+    CHECK_EQ(ps[1], 2);
+    CHECK_EQ(ps[2], 6);
+    CHECK_EQ(FreshProblem::reference(K::TriangularIndex, {1})[0], 1);
+    CHECK_EQ(FreshProblem::reference(K::TriangularIndex, {6})[0], 3);
+    CHECK_EQ(FreshProblem::reference(K::TriangularIndex, {7})[0], 4);
+    CHECK_EQ(FreshProblem::reference(K::FactorialTrailingZeros, {4})[0], 0);
+    CHECK_EQ(FreshProblem::reference(K::FactorialTrailingZeros, {25})[0], 6);
+    CHECK_EQ(FreshProblem::reference(K::FactorialTrailingZeros, {200})[0], 49);
+}
+
+TEST(fresh_batch_3_builds_sets_and_balanced_generators_are_balanced) {
+    using K = FreshProblem::Kind;
+    for (K k : {K::MatrixDiagonalSum, K::IsPerfectNumber, K::ReverseNumber, K::DotProductHalves, K::DigitalRoot,
+                K::PalindromeNumber, K::RotateLeftByK, K::PrefixSums, K::TriangularIndex, K::FactorialTrailingZeros}) {
+        FreshProblem p(k, 7, 1);
+        CHECK_EQ(p.generateInstances(1).size(), static_cast<size_t>(200));
+        CHECK_EQ(p.generateAdversarialInstances(1).size(), static_cast<size_t>(2000));
+        for (const Instance& inst : p.generateAdversarialInstances(1)) CHECK(p.isSolution(inst.input, inst.expectedOutput));
+    }
+    size_t perfect = 0, pal = 0;
+    FreshProblem pf(K::IsPerfectNumber, 7, 1), pp(K::PalindromeNumber, 7, 1);
+    for (const Instance& inst : pf.generateAdversarialInstances(1)) perfect += inst.expectedOutput[0] == 1;
+    for (const Instance& inst : pp.generateAdversarialInstances(1)) pal += inst.expectedOutput[0] == 1;
+    CHECK(perfect > 500 && perfect < 800);
+    CHECK(pal > 900 && pal < 1200);
+}
+
+TEST(fresh_batch_3_problems_have_known_solutions_within_the_grammar) {
+    Interpreter interp(20000);
+    using K = FreshProblem::Kind;
+    struct P { const char* name; K k; StmtPtr prog; };
+    std::vector<P> ps;
+    ps.push_back({"digital_root", K::DigitalRoot, seq(list(
+        makeAssignArray(C(0), B(E::Add, B(E::Mod, B(E::Sub, A(C(0)), C(1)), C(9)), C(1)))))});
+    ps.push_back({"prefix_sums", K::PrefixSums, seq(list(S(1, C(1)),
+        makeWhile(Q(E::Lt, V(1), V(0)), list(
+            makeAssignArray(V(1), B(E::Add, A(V(1)), A(B(E::Sub, V(1), C(1))))), inc(1)))))});
+    ps.push_back({"triangular_index", K::TriangularIndex, seq(list(S(1, C(0)),
+        makeWhile(Q(E::Lt, B(E::Div, B(E::Mul, V(1), B(E::Add, V(1), C(1))), C(2)), A(C(0))), list(inc(1))),
+        makeAssignArray(C(0), V(1))))});
+    ps.push_back({"factorial_trailing_zeros", K::FactorialTrailingZeros, seq(list(S(1, A(C(0))), S(2, C(0)),
+        makeWhile(Q(E::Gt, V(1), C(0)), list(S(1, B(E::Div, V(1), C(5))), S(2, B(E::Add, V(2), V(1))))),
+        makeAssignArray(C(0), V(2))))});
+    ps.push_back({"reverse_number", K::ReverseNumber, seq(list(S(1, A(C(0))), S(2, C(0)),
+        makeWhile(Q(E::Gt, V(1), C(0)), list(S(2, B(E::Add, B(E::Mul, V(2), C(10)), B(E::Mod, V(1), C(10)))),
+                                              S(1, B(E::Div, V(1), C(10))))),
+        makeAssignArray(C(0), V(2))))});
+    ps.push_back({"palindrome_number", K::PalindromeNumber, seq(list(S(1, A(C(0))), S(2, C(0)),
+        makeWhile(Q(E::Gt, V(1), C(0)), list(S(2, B(E::Add, B(E::Mul, V(2), C(10)), B(E::Mod, V(1), C(10)))),
+                                              S(1, B(E::Div, V(1), C(10))))),
+        makeAssignArray(C(0), B(E::Sub, C(1), Q(E::Ne, V(2), A(C(0)))))))});
+    ps.push_back({"is_perfect_number", K::IsPerfectNumber, seq(list(S(1, A(C(0))), S(2, C(1)), S(3, C(0)),
+        makeWhile(Q(E::Lt, V(2), V(1)), list(
+            makeIf(Q(E::Eq, B(E::Mod, V(1), V(2)), C(0)), list(S(3, B(E::Add, V(3), V(2))))), inc(2))),
+        makeAssignArray(C(0), Q(E::Eq, V(3), V(1)))))});
+    ps.push_back({"dot_product_halves", K::DotProductHalves, seq(list(S(1, B(E::Div, V(0), C(2))), S(2, C(0)), S(3, C(0)),
+        makeWhile(Q(E::Lt, V(2), V(1)), list(
+            S(3, B(E::Add, V(3), B(E::Mul, A(V(2)), A(B(E::Add, V(1), V(2)))))), inc(2))),
+        makeAssignArray(C(0), V(3))))});
+    ps.push_back({"matrix_diagonal_sum", K::MatrixDiagonalSum, seq(list(S(1, C(0)),
+        makeWhile(Q(E::Le, B(E::Mul, B(E::Add, V(1), C(1)), B(E::Add, V(1), C(1))), V(0)), list(inc(1))),
+        S(2, C(0)), S(3, C(0)),
+        makeWhile(Q(E::Lt, V(2), V(1)), list(
+            S(3, B(E::Add, V(3), A(B(E::Mul, V(2), B(E::Add, V(1), C(1)))))), inc(2))),
+        makeAssignArray(C(0), V(3))))});
+    // k stays in arr[0]; copy the items to a second pass is not available, so rotate by k single steps (shift left once)
+    ps.push_back({"rotate_left_by_k", K::RotateLeftByK, seq(list(S(1, A(C(0))),
+        makeWhile(Q(E::Gt, V(1), C(0)), list(
+            S(2, A(C(1))), S(3, C(1)),
+            makeWhile(Q(E::Lt, V(3), B(E::Sub, V(0), C(1))), list(
+                makeAssignArray(V(3), A(B(E::Add, V(3), C(1)))), inc(3))),
+            makeAssignArray(B(E::Sub, V(0), C(1)), V(2)),
+            S(1, B(E::Sub, V(1), C(1))))))) });
+    for (auto& p : ps) {
+        FreshProblem prob(p.k, 7, 1);
+        CHECK(p.prog->size() <= 150);
+        for (const Instance& inst : prob.generateInstances(1)) CHECK(prob.evaluate(*p.prog, inst, interp).status == ExecStatus::SUCCESS);
+        for (const Instance& inst : prob.generateAdversarialInstances(1)) CHECK(prob.evaluate(*p.prog, inst, interp).status == ExecStatus::SUCCESS);
+    }
+}

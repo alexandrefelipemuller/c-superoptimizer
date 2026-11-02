@@ -38,6 +38,18 @@ namespace algosearch {
 //   count_divisors: arr = {n}, n in 1..100; arr[0] = the number of divisors of n.
 //   kth_smallest: arr = {k, a_1 .. a_m}, m in 1..8, items in [-20, 20], k in 1..m; arr[0] = the k-th smallest item.
 //   josephus: arr = {n, k}, n in 1..12, k in 1..5; arr[0] = the 1-based survivor of the Josephus problem.
+// Batch 3 (section 151):
+//   matrix_diagonal_sum: arr = n*n items (n in 2..3) in [-20, 20]; arr[0] = the sum of items i*n+i.
+//   is_perfect_number: arr = {n}, n in 1..500 (three in ten draws are 6, 28 or 496); arr[0] = 1 if the proper divisors
+//     of n sum to n, else 0.
+//   reverse_number: arr = {n}, n in 1..9999; arr[0] = the decimal digits of n reversed.
+//   dot_product_halves: arr = 2m items (m in 1..4) in [-9, 9]; arr[0] = sum of arr[i]*arr[m+i] for i < m.
+//   digital_root: arr = {n}, n in 1..99999; arr[0] = the digital root.
+//   palindrome_number: arr = {n}, n in 1..9999 (half are palindromes); arr[0] = 1 if n reads the same reversed.
+//   rotate_left_by_k: arr = {k, a_0 .. a_(m-1)}, m in 2..7, k in 0..m-1; arr[0] stays k, the items rotate left by k.
+//   prefix_sums: arr = 1..8 items in [-20, 20]; in place a_i := a_0 + ... + a_i.
+//   triangular_index: arr = {n}, n in 1..100; arr[0] = the smallest k with k(k+1)/2 >= n.
+//   factorial_trailing_zeros: arr = {n}, n in 1..200; arr[0] = the number of trailing zeros of n!.
 class FreshProblem : public Problem {
 public:
     enum class Kind {
@@ -45,7 +57,10 @@ public:
         BalancedParentheses, SwapAdjacentPairs, CountPairsWithSum,
         // Batch 2 (section 150; encodings fixed before implementation)
         MatrixTranspose, BinaryToDecimal, RangeMaxMin, AdjacentDifferences, Lcm, MaxNonAdjacentSum, Isqrt, CountDivisors,
-        KthSmallest, Josephus
+        KthSmallest, Josephus,
+        // Batch 3 (section 151; encodings fixed before implementation)
+        MatrixDiagonalSum, IsPerfectNumber, ReverseNumber, DotProductHalves, DigitalRoot, PalindromeNumber, RotateLeftByK,
+        PrefixSums, TriangularIndex, FactorialTrailingZeros
     };
 
     FreshProblem(Kind kind, int numVars, uint64_t seed);
