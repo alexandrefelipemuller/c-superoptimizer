@@ -286,3 +286,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 152. Diagnosis after the learning curve: literals limited to 0..3; --max-const test, predictions registered before the run; corrects the error-share figure | 11_sections_121-125.md | 1495 |
 | 152r. --max-const 10 does not solve digital_root (1 of 20; prediction failed); the search plateaus at the score of n % 9 (177 of 200); budget 20000/size does not move it | 11_sections_121-125.md | 1503 |
 | 153. Per-case (lexicase) selection: new flag --lexicase-rate, design and four predictions registered before the run | 11_sections_121-125.md | 1511 |
+| 153r. Lexicase R=0.25, 20 seeds: predictions 1 and 2 failed (digital_root 0/20); 40 vs 55 of 120 solved runs on six problems (p=0.064); confirmation on new seeds registered | 11_sections_121-125.md | 1518 |
