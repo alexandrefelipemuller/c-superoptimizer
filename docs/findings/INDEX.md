@@ -281,3 +281,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 150. Three generator pieces after batch 1 (digit loop, counter with modulus test, parity-signed sum); batch 2 predictions and encodings registered before implementing it | 11_sections_121-125.md | 1431 |
 | 150r. Batch 2 of the learning curve: beam solves 6 of 10 (M1 3 -> 6, a rise by the rule); predictions 1, 4, 5 failed | 11_sections_121-125.md | 1460 |
 | 150s. Batch 2: the four unsolved problems (adjacent_differences, lcm, josephus, matrix_transpose) have known solutions in the grammar (test) | 11_sections_121-125.md | 1468 |
+| 151. Batch 3 of the learning curve: encodings and seven predictions registered before implementing it; library stays frozen at e118572 | 11_sections_121-125.md | 1472 |
