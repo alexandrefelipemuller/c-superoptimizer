@@ -190,3 +190,41 @@ TEST(fresh_batch_2_builds_train_and_test_sets_that_its_references_solve) {
         for (const Instance& inst : p.generateAdversarialInstances(1)) CHECK(p.isSolution(inst.input, inst.expectedOutput));
     }
 }
+
+TEST(fresh_unsolved_batch_2_problems_have_known_solutions_within_the_grammar) {
+    Interpreter interp(20000);
+    using K = FreshProblem::Kind;
+    struct P { const char* name; K k; StmtPtr prog; };
+    std::vector<P> ps;
+    // out[i] = arr[i] - arr[i-1], filled from the back so that arr[i-1] is still the input value
+    ps.push_back({"adjacent_differences", K::AdjacentDifferences, seq(list(S(1, B(E::Sub, V(0), C(1))),
+        makeWhile(Q(E::Gt, V(1), C(0)), list(
+            makeAssignArray(V(1), B(E::Sub, A(V(1)), A(B(E::Sub, V(1), C(1))))),
+            S(1, B(E::Sub, V(1), C(1)))))))});
+    // gcd by remainders, then arr[0] / g * arr[1]
+    ps.push_back({"lcm", K::Lcm, seq(list(S(1, A(C(0))), S(2, A(C(1))),
+        makeWhile(Q(E::Ne, V(2), C(0)), list(S(3, B(E::Mod, V(1), V(2))), S(1, V(2)), S(2, V(3)))),
+        makeAssignArray(C(0), B(E::Mul, B(E::Div, A(C(0)), V(1)), A(C(1))))))});
+    // survivor = (survivor + k) % i for i = 2..n; answer survivor + 1
+    ps.push_back({"josephus", K::Josephus, seq(list(S(1, A(C(0))), S(2, A(C(1))), S(3, C(0)), S(4, C(2)),
+        makeWhile(Q(E::Le, V(4), V(1)), list(S(3, B(E::Mod, B(E::Add, V(3), V(2)), V(4))), inc(4))),
+        makeAssignArray(C(0), B(E::Add, V(3), C(1)))))});
+    // n = floor(sqrt(len)); swap arr[i*n+j] and arr[j*n+i] for j > i
+    ps.push_back({"matrix_transpose", K::MatrixTranspose, seq(list(S(1, C(0)),
+        makeWhile(Q(E::Le, B(E::Mul, B(E::Add, V(1), C(1)), B(E::Add, V(1), C(1))), V(0)), list(inc(1))),
+        S(2, C(0)),
+        makeWhile(Q(E::Lt, V(2), V(1)), list(
+            S(3, B(E::Add, V(2), C(1))),
+            makeWhile(Q(E::Lt, V(3), V(1)), list(
+                S(4, A(B(E::Add, B(E::Mul, V(2), V(1)), V(3)))),
+                makeAssignArray(B(E::Add, B(E::Mul, V(2), V(1)), V(3)), A(B(E::Add, B(E::Mul, V(3), V(1)), V(2)))),
+                makeAssignArray(B(E::Add, B(E::Mul, V(3), V(1)), V(2)), V(4)),
+                inc(3))),
+            inc(2)))))});
+    for (auto& p : ps) {
+        FreshProblem prob(p.k, 7, 1);
+        CHECK(p.prog->size() <= 150);
+        for (const Instance& inst : prob.generateInstances(1)) CHECK(prob.evaluate(*p.prog, inst, interp).status == ExecStatus::SUCCESS);
+        for (const Instance& inst : prob.generateAdversarialInstances(1)) CHECK(prob.evaluate(*p.prog, inst, interp).status == ExecStatus::SUCCESS);
+    }
+}

@@ -280,3 +280,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 149c. Batch 1: the seven unsolved problems all have known solutions (23-41 nodes); six are missing pieces, balanced_parentheses also has an under-determined training set | 11_sections_121-125.md | 1414 |
 | 150. Three generator pieces after batch 1 (digit loop, counter with modulus test, parity-signed sum); batch 2 predictions and encodings registered before implementing it | 11_sections_121-125.md | 1431 |
 | 150r. Batch 2 of the learning curve: beam solves 6 of 10 (M1 3 -> 6, a rise by the rule); predictions 1, 4, 5 failed | 11_sections_121-125.md | 1460 |
+| 150s. Batch 2: the four unsolved problems (adjacent_differences, lcm, josephus, matrix_transpose) have known solutions in the grammar (test) | 11_sections_121-125.md | 1468 |
