@@ -288,3 +288,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 153. Per-case (lexicase) selection: new flag --lexicase-rate, design and four predictions registered before the run | 11_sections_121-125.md | 1511 |
 | 153r. Lexicase R=0.25, 20 seeds: predictions 1 and 2 failed (digital_root 0/20); 40 vs 55 of 120 solved runs on six problems (p=0.064); confirmation on new seeds registered | 11_sections_121-125.md | 1518 |
 | 153c. Lexicase confirmation (new seeds): +8 solved runs on six reachable problems (35 vs 27 of 180, p=0.33); no new problem reached; opt-in, closed for reach | 11_sections_121-125.md | 1525 |
+| 154. Step 3 analysis: 11 of 14 key statements of the unsolved known solutions have support 0 in 90 problems' solved programs; the mined library is not built | 11_sections_121-125.md | 1531 |
