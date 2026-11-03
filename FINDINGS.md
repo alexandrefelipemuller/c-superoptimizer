@@ -90,6 +90,9 @@ system generalizes.
 
 ## 4. Closed as negative (do not retry without a new idea)
 
+- Per-case (lexicase) selection, `--lexicase-rate` (153, 153r, 153c): no problem at zero is reached (digital_root plateau at 177 of 200 unchanged); at most +8 solved runs of 180 on six reachable problems (p = 0.33 on new seeds). Opt-in, not promoted.
+- `--max-const 10` (152r): digital_root 1 of 20 against 0; the literal range 0..3 is not the blocker.
+
 - Population diversity, niching, crossover, annealing, score bands as ways to
   find new algorithms (5, 20, 21, 28; later removed). The grammar prior is what
   matters (5).
