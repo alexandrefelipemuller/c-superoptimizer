@@ -95,6 +95,7 @@ system generalizes.
 - Mined statement library (154) and a loop skeleton with an enumerated update expression (155, 156): the key statements of the unsolved problems are absent from solved programs; the scalar-recurrence loop is 9-13% of fresh candidates but the array-update loop 0.014%, and the enumerated piece would reach at most 2 of 8 problems and needs staged evaluation. Not built.
 - Sorting diversity funnel (157): without sort skeletons fresh sorters are one nested compare-swap template (0.08% with 8 variables); wrapping the adjacent pass in an outer repeat makes 8% of those programs bubble sort, so the gap is a missing composition move, not budget; no lever built.
 - Outer-repeat move (158, opt-in `--outer-repeat`): fresh bubble sorters 0 -> 24 per 600 000 candidates, but only 1 of 8 searches keeps one (predicted >= 4); the cheaper exchange template takes the beam at equal score. Necessary, not sufficient; levers 2 (insertion) and 3 (recursion) pending.
+- Nested adjacent pass (159, opt-in `--adjacent-nested`): fresh insertion sorters 0 -> 21 per 600 000 candidates and insertion sort kept in 7 of 8 searches (predicted <= 2); novelty alone adds nothing. With 158 and 159 the search holds exchange, insertion and (1 of 8) bubble without a sort skeleton. Lever 3 (recursion: merge, quick) pending.
 
 - Population diversity, niching, crossover, annealing, score bands as ways to
   find new algorithms (5, 20, 21, 28; later removed). The grammar prior is what

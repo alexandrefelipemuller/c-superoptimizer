@@ -278,9 +278,12 @@ def triage(sol, num_vars, seed_rec, tests, cost_inputs, fp_inputs):
     except Abort:
         empty_ok = False
     cost = {}
-    for label, a in cost_inputs:
-        m.run(a)
-        cost[label] = m.steps
+    try:
+        for label, a in cost_inputs:
+            m.run(a)
+            cost[label] = m.steps
+    except Abort as ex:  # passes the tests but aborts on the larger cost inputs (e.g. recursion depth)
+        return {'status': 'ABORT_COST:' + str(ex)}
     calls = m.calls
     tr = []
     m.trace = tr
