@@ -92,6 +92,7 @@ system generalizes.
 
 - Per-case (lexicase) selection, `--lexicase-rate` (153, 153r, 153c): no problem at zero is reached (digital_root plateau at 177 of 200 unchanged); at most +8 solved runs of 180 on six reachable problems (p = 0.33 on new seeds). Opt-in, not promoted.
 - `--max-const 10` (152r): digital_root 1 of 20 against 0; the literal range 0..3 is not the blocker.
+- Mined statement library (154) and a loop skeleton with an enumerated update expression (155, 156): the key statements of the unsolved problems are absent from solved programs; the scalar-recurrence loop is 9-13% of fresh candidates but the array-update loop 0.014%, and the enumerated piece would reach at most 2 of 8 problems and needs staged evaluation. Not built.
 
 - Population diversity, niching, crossover, annealing, score bands as ways to
   find new algorithms (5, 20, 21, 28; later removed). The grammar prior is what

@@ -290,3 +290,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 153c. Lexicase confirmation (new seeds): +8 solved runs on six reachable problems (35 vs 27 of 180, p=0.33); no new problem reached; opt-in, closed for reach | 11_sections_121-125.md | 1525 |
 | 154. Step 3 analysis: 11 of 14 key statements of the unsolved known solutions have support 0 in 90 problems' solved programs; the mined library is not built | 11_sections_121-125.md | 1531 |
 | 155. Evaluation of a skeleton with enumerated update expression: fill spaces 9e4-8e9, four of eight problems enumerable if the skeleton is given; skeleton frequency unmeasured; not built | 11_sections_121-125.md | 1538 |
+| 156. Skeleton frequency among fresh candidates: scalar-recurrence loop 9-13%, array-update loop 0.014%; the enumerated-update piece reaches at most 2 of 8 problems and needs staged evaluation; not built | 11_sections_121-125.md | 1545 |
