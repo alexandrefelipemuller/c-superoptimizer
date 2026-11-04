@@ -1,6 +1,6 @@
 // Section 157: forward reachability of sorters. Generates fresh candidates (sorting config) of one size and keeps the
 // ones that sort every array of length 2..5 over values {0,1,2} (duplicates included). Prints them, "programa:" format.
-// usage: sort_census SIZE COUNT SEED NUMVARS AUX(0/1) REC(0/1)
+// usage: sort_census SIZE COUNT SEED NUMVARS AUX(0/1) REC(0/1) [OUTER_REPEAT_BIAS]
 // Build: g++ -std=c++20 -O2 -Isrc scripts/sort_census.cpp $(find build/lib -name '*.o' ! -name main.o) -pthread
 #include <algorithm>
 #include <cstdlib>
@@ -20,6 +20,7 @@ int main(int argc, char** argv) {
     unsigned long seed = std::strtoul(argv[3], nullptr, 10);
     int nv = std::atoi(argv[4]);
     bool aux = std::atoi(argv[5]), rec = std::atoi(argv[6]);
+    double outerRepeat = argc > 7 ? std::atof(argv[7]) : 0.0;
     GenConfig g;
     g.numVars = nv;
     g.loopAccumulatorBias = 0.4;
@@ -32,6 +33,7 @@ int main(int argc, char** argv) {
     g.scalarLoopIndexRange = g.combinatorStep = true;
     if (aux) g.secondArrayBias = 0.3;
     if (rec) g.recursionCallBias = 0.3;
+    g.outerRepeatBias = outerRepeat;
     std::vector<std::vector<int>> inputs;
     for (int n = 2; n <= 5; ++n) {
         std::vector<int> a(n, 0);

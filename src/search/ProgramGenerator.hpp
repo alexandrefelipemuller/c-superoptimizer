@@ -203,6 +203,11 @@ struct GenConfig {
     // directly in 2..9 (the narrow form section 137's whole-term-set draw reached too rarely). 0 = off, no draw.
     double countModBias = 0.1;  // default since section 138
 
+    // Section 158 (opt-in): probability that a fresh program, or a mutated one, is wrapped whole in an outer repeat
+    // `vK = 0; while (vK < v0) { <program>; vK = vK + 1; }` with vK a variable the program does not use. A generic
+    // composition move (section 157: the adjacent compare-swap pass becomes bubble sort). 0 = off, no RNG draw.
+    double outerRepeatBias = 0.0;
+
     // Section 87: a sixth stateful piece, DistinctCount -- per element, the
     // number of equal elements and whether one came earlier; only first
     // occurrences reach a threshold test, counted or tested for existence.

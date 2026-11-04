@@ -3258,7 +3258,27 @@ TspBranchAndBound buildTspBranchAndBoundWithGuard(const std::vector<int>& vars, 
     return buildTspBranchAndBoundImpl(vars, std::move(guard), loopsUsed);
 }
 
+// Section 158: wrap `root` (a Block) in `vK = 0; while (vK < v0) { <root body>; vK = vK + 1; }`, vK in 1..numVars-1
+// not used by the program. No-op when the program has no loop (nothing to repeat) or no free variable.
+void wrapOuterRepeat(Program& root, const GenConfig& cfg) {
+    if (countLoops(*root) == 0) return;
+    std::set<int> used = {0};
+    collectVars(*root, used);
+    int k = -1;
+    for (int v = 1; v < cfg.numVars; ++v) {
+        if (!used.count(v)) { k = v; break; }
+    }
+    if (k < 0) return;
+    std::vector<StmtPtr> body = std::move(root->body);
+    body.push_back(makeAssign(k, makeBinOp(ExprKind::Add, makeVar(k), makeIntConst(1))));
+    root->body.clear();
+    root->body.push_back(makeAssign(k, makeIntConst(0)));
+    root->body.push_back(makeWhile(makeCompare(ExprKind::Lt, makeVar(k), makeVar(0)), std::move(body)));
+}
+
 Program generateRandomProgram(Random& rng, int targetSize, const GenConfig& cfg) {
+    const bool wrap = cfg.outerRepeatBias > 0.0 && rng.chance(cfg.outerRepeatBias);
+    if (wrap) targetSize = std::max(targetSize - 8, 1);
     auto root = makeBlock();
     int loopsUsed = 0;
     int guard = 0;
@@ -3272,6 +3292,7 @@ Program generateRandomProgram(Random& rng, int targetSize, const GenConfig& cfg)
         // a later sibling like `arr[0] = ...` would silently overwrite it.
         if (cfg.combinatorBias > 0.0 && root->body.back()->kind == StmtKind::Block) break;
     }
+    if (wrap) wrapOuterRepeat(root, cfg);
     return root;
 }
 
@@ -3324,6 +3345,7 @@ Program growProgram(const Stmt& seed, int targetSize, Random& rng, const GenConf
             mutateCompareLocally(*target->cond, rng, cfg);
         }
     }
+    if (cfg.outerRepeatBias > 0.0 && rng.chance(cfg.outerRepeatBias)) wrapOuterRepeat(root, cfg);
     return root;
 }
 
