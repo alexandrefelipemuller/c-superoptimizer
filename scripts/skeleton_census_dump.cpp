@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     int count = std::atoi(argv[2]);
     unsigned long seed = std::strtoul(argv[3], nullptr, 10);
     GenConfig g;  // defaults of main.cpp's Args
-    g.numVars = 4;
+    g.numVars = argc > 4 ? std::atoi(argv[4]) : 4;
     g.loopAccumulatorBias = 0.4;
     g.localCondMutationRate = 0.3;
     g.combinatorBias = 0.5;
