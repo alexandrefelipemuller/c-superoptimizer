@@ -2269,6 +2269,11 @@ StmtPtr genCombinatorBlock(Random& rng, const GenConfig& cfg, int& loopsUsed) {
     if (cfg.sumIfBias > 0.0 && (loop == Loop::Single || loop == Loop::Adjacent) && rng.chance(cfg.sumIfBias)) {
         rel = Relation::SumIf;
     }
+    // Section 159: nested adjacent pass (inner range set by the outer counter). Drawn only with the flag on.
+    int nestedAdjMode = 0;  // 0 = flat, 1 = descending prefix, 2 = ascending prefix
+    if (cfg.adjacentNestedBias > 0.0 && loop == Loop::Adjacent && nestedOk && rng.chance(cfg.adjacentNestedBias)) {
+        nestedAdjMode = rng.chance(0.5) ? 1 : 2;
+    }
     ExprKind cmp = drawComparator(rng);
 
     // Operands for this loop shape.
@@ -2577,6 +2582,30 @@ StmtPtr genCombinatorBlock(Random& rng, const GenConfig& cfg, int& loopsUsed) {
             break;
         }
         case Loop::Adjacent:
+            if (nestedAdjMode != 0) {
+                // vj = outer counter, vi = the pass index the relation uses.
+                std::vector<StmtPtr> outerBody;
+                if (nestedAdjMode == 1) {  // vi = vj; while (vi > start) { pass; vi-- }
+                    outerBody.push_back(makeAssign(vi, makeVar(vj)));
+                    std::vector<StmtPtr> body;
+                    for (auto& s : inner) body.push_back(std::move(s));
+                    body.push_back(makeAssign(vi, makeBinOp(ExprKind::Sub, makeVar(vi), makeIntConst(1))));
+                    loopsUsed++;
+                    outerBody.push_back(makeWhile(makeCompare(ExprKind::Gt, makeVar(vi), makeIntConst(loopStart)), std::move(body)));
+                } else {  // vi = start + 1; while (vi <= vj) { pass; vi++ }
+                    outerBody.push_back(makeAssign(vi, makeIntConst(loopStart + 1)));
+                    std::vector<StmtPtr> body;
+                    for (auto& s : inner) body.push_back(std::move(s));
+                    body.push_back(makeAssign(vi, makeBinOp(ExprKind::Add, makeVar(vi), makeIntConst(1))));
+                    loopsUsed++;
+                    outerBody.push_back(makeWhile(makeCompare(ExprKind::Le, makeVar(vi), makeVar(vj)), std::move(body)));
+                }
+                root.push_back(makeAssign(vj, makeIntConst(loopStart + 1)));
+                appendCountingWhile(root, vj, bound->clone(), loopsUsed, [&](std::vector<StmtPtr>& body) {
+                    for (auto& s : outerBody) body.push_back(std::move(s));
+                });
+                break;
+            }
             // i from start + 1: every adjacent pair (elem(i-1), elem(i)).
             root.push_back(makeAssign(vi, makeIntConst(loopStart + 1)));
             appendCountingWhile(root, vi, bound->clone(), loopsUsed, [&](std::vector<StmtPtr>& body) {

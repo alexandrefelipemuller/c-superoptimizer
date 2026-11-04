@@ -207,6 +207,11 @@ struct GenConfig {
     // `vK = 0; while (vK < v0) { <program>; vK = vK + 1; }` with vK a variable the program does not use. A generic
     // composition move (section 157: the adjacent compare-swap pass becomes bubble sort). 0 = off, no RNG draw.
     double outerRepeatBias = 0.0;
+    // Section 159 (opt-in): probability that a combinator adjacent pass becomes a nested adjacent pass whose inner
+    // range is set by the outer counter: either `j = i; while (j > start) { pass(j); j = j - 1; }` (descending prefix,
+    // insertion sort when the pass is a compare-swap) or `j = start + 1; while (j <= i) { pass(j); j = j + 1; }`
+    // (ascending prefix). Needs two free loop slots. 0 = off, no RNG draw.
+    double adjacentNestedBias = 0.0;
 
     // Section 87: a sixth stateful piece, DistinctCount -- per element, the
     // number of equal elements and whether one came earlier; only first
