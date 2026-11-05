@@ -412,7 +412,7 @@ BeamSearch::BeamSearch(const Problem& problem, SearchConfig config) : problem_(p
 std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
     gForbidStmtMask.store(config_.forbidStmtMask);
     Random rng(config_.seed);
-    Interpreter interp(config_.stepLimit, /*maxRecursionDepth=*/200, config_.genConfig.recursionCallBias > 0.0);
+    Interpreter interp(config_.stepLimit, config_.maxRecursionDepth, config_.genConfig.recursionCallBias > 0.0);
     Dedup dedup;
 
     std::vector<CandidateRecord> beam;
@@ -497,7 +497,7 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
     // Section 98: cost-profile novelty state, global across levels and restarts.
     std::vector<CostProfile> archivedProfiles;
     std::map<int, std::vector<Instance>> probeCache;
-    Interpreter probeInterp(config_.stepLimit * 50, /*maxRecursionDepth=*/200, config_.genConfig.recursionCallBias > 0.0);
+    Interpreter probeInterp(config_.stepLimit * 50, config_.maxRecursionDepth, config_.genConfig.recursionCallBias > 0.0);
     long profileBonusesGiven = 0;
 
     int debugBestPrinted = -1;

@@ -23,6 +23,7 @@ Writes RUN_DIR/triage.json and RUN_DIR/triage.md.
 import copy, hashlib, json, math, multiprocessing, os, random, re, sys
 
 sys.setrecursionlimit(100000)
+MAX_DEPTH = int(os.environ.get('TRIAGE_MAX_DEPTH', '200'))  # section 164: match --max-recursion-depth of the run
 
 class Abort(Exception):
     pass
@@ -200,7 +201,7 @@ class Machine:
             if self.trace is not None and i != j: self.trace.append(('s', min(i, j), max(i, j)))
         elif k == 'call':
             lo = self.ev(s[1]); hi = self.ev(s[2])
-            if self.depth >= 200: raise Abort('depth')
+            if self.depth >= MAX_DEPTH: raise Abort('depth')
             saved = self.v
             self.v = [0] * self.nv
             self.v[0] = len(self.a)
