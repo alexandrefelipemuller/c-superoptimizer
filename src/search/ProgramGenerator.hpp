@@ -217,6 +217,10 @@ struct GenConfig {
     // b = b + 1; } i = i + 1; }` with an optional pivot placement swap. The range is [0, n) or, with recursion on,
     // [v1, v2); the pivot is the last cell, the first cell or the key arr[0]. Needs 6 variables. 0 = off, no draw.
     double partitionBias = 0.0;
+    // Section 162 (opt-in): probability that a top-level slot is the range-recursion shell `if (v2 - v1 > 1) {
+    // <partition block on [v1, v2)>; call(v1, b or b-1); call(b or b+1, v2); }`: the split is the partition boundary.
+    // Needs recursionCallBias > 0 (lo/hi seeding) and 6 variables. 0 = off, no RNG draw.
+    double rangeShellBias = 0.0;
 
     // Section 87: a sixth stateful piece, DistinctCount -- per element, the
     // number of equal elements and whether one came earlier; only first

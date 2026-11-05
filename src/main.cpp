@@ -204,6 +204,7 @@ struct CliArgs {
     double outerRepeatBias = 0.0;    // section 158 (opt-in)
     double adjacentNestedBias = 0.0; // section 159 (opt-in)
     double partitionBias = 0.0;      // section 161 (opt-in)
+    double rangeShellBias = 0.0;     // section 162 (opt-in)
     double countModBias = 0.1;       // section 138; default (--count-mod 0 restores the old grammar)
     double dcShellSearchKey = 0.0;  // section 121c
     double dcShellSearchEnd = 0.0;  // section 123
@@ -310,6 +311,7 @@ bool parseArgs(int argc, char** argv, CliArgs& args) {
         else if (arg == "--signed-parity") args.signedParityBias = std::stod(next("--signed-parity"));
         else if (arg == "--count-term") args.countTermBias = std::stod(next("--count-term"));
         else if (arg == "--square-term") args.squareTermBias = std::stod(next("--square-term"));
+        else if (arg == "--range-shell") args.rangeShellBias = std::stod(next("--range-shell"));
         else if (arg == "--partition") args.partitionBias = std::stod(next("--partition"));
         else if (arg == "--adjacent-nested") args.adjacentNestedBias = std::stod(next("--adjacent-nested"));
         else if (arg == "--outer-repeat") args.outerRepeatBias = std::stod(next("--outer-repeat"));
@@ -687,6 +689,7 @@ void runBenchmarkMode(const CliArgs& args) {
         config.genConfig.outerRepeatBias = args.outerRepeatBias;
         config.genConfig.adjacentNestedBias = args.adjacentNestedBias;
         config.genConfig.partitionBias = args.partitionBias;
+        config.genConfig.rangeShellBias = args.rangeShellBias;
     config.genConfig.dcShellSearchKey = args.dcShellSearchKey;
     config.genConfig.dcShellSearchEnd = args.dcShellSearchEnd;
 
@@ -1354,6 +1357,7 @@ int main(int argc, char** argv) {
         config.genConfig.outerRepeatBias = args.outerRepeatBias;
         config.genConfig.adjacentNestedBias = args.adjacentNestedBias;
         config.genConfig.partitionBias = args.partitionBias;
+        config.genConfig.rangeShellBias = args.rangeShellBias;
     config.genConfig.dcShellSearchKey = args.dcShellSearchKey;
     config.genConfig.dcShellSearchEnd = args.dcShellSearchEnd;
     config.adaptiveBiasLogPath = args.adaptiveBiasLog;

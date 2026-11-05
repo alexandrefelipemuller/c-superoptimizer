@@ -24,6 +24,7 @@ int main(int argc, char** argv) {
     double outerRepeat = argc > 7 ? std::atof(argv[7]) : 0.0;
     double adjNested = argc > 8 ? std::atof(argv[8]) : 0.0;
     double partition = argc > 9 ? std::atof(argv[9]) : 0.0;
+    double rangeShell = argc > 10 ? std::atof(argv[10]) : 0.0;
     GenConfig g;
     g.numVars = nv;
     g.loopAccumulatorBias = 0.4;
@@ -39,6 +40,7 @@ int main(int argc, char** argv) {
     g.outerRepeatBias = outerRepeat;
     g.adjacentNestedBias = adjNested;
     g.partitionBias = partition;
+    g.rangeShellBias = rangeShell;
     std::vector<std::vector<int>> inputs;
     for (int n = 2; n <= 5; ++n) {
         std::vector<int> a(n, 0);

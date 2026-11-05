@@ -12,6 +12,8 @@
 
 namespace algosearch {
 
+std::vector<StmtPtr> genPartitionStmts(Random& rng, const GenConfig& cfg, bool ranged, int& loopsUsed);  // sections 161-162
+
 namespace {
 
 // Temporary, research-only instrumentation: counts how often the skeleton
@@ -3037,36 +3039,24 @@ StmtPtr genStmt(Random& rng, int depthBudget, const GenConfig& cfg, int& loopsUs
                       std::move(body), std::move(base));
     }
 
+    // Section 162: range-recursion shell (`--range-shell`): size guard on [v1, v2), a partition block whose boundary
+    // b is the split, and two calls on the two sides of the split (offsets drawn at random).
+    if (!insideIf && !insideWhile && cfg.rangeShellBias > 0.0 && cfg.recursionCallBias > 0.0 && cfg.numVars >= 6 &&
+        canLoop && depthBudget > 0 && rng.chance(cfg.rangeShellBias)) {
+        std::vector<StmtPtr> body = genPartitionStmts(rng, cfg, /*ranged=*/true, loopsUsed);
+        const int b = 4;
+        auto leftEnd = rng.chance(0.5) ? makeVar(b) : makeBinOp(ExprKind::Sub, makeVar(b), makeIntConst(1));
+        auto rightStart = rng.chance(0.5) ? makeVar(b) : makeBinOp(ExprKind::Add, makeVar(b), makeIntConst(1));
+        body.push_back(makeCall(makeVar(1), std::move(leftEnd)));
+        body.push_back(makeCall(std::move(rightStart), makeVar(2)));
+        return makeIf(makeCompare(ExprKind::Gt, makeBinOp(ExprKind::Sub, makeVar(2), makeVar(1)), makeIntConst(1)),
+                      std::move(body));
+    }
+
     // Section 161: partition block (conditional swap that advances a boundary).
     if (canLoop && cfg.numVars >= 6 && depthBudget > 0 && cfg.partitionBias > 0.0 && rng.chance(cfg.partitionBias)) {
-        const int i = 3, b = 4, p = 5;
-        const bool ranged = cfg.recursionCallBias > 0.0 && rng.chance(0.5);
-        auto lo = [&]() { return ranged ? makeVar(1) : makeIntConst(0); };
-        auto hi = [&]() { return ranged ? makeVar(2) : makeVar(0); };
-        auto hiMinus1 = [&]() { return makeBinOp(ExprKind::Sub, hi(), makeIntConst(1)); };
-        auto loPlus1 = [&]() { return makeBinOp(ExprKind::Add, lo(), makeIntConst(1)); };
-        const int mode = rng.uniformInt(0, 2);  // 0 last cell, 1 first cell, 2 key arr[0]
-        static const ExprKind ops[] = {ExprKind::Lt, ExprKind::Le, ExprKind::Gt, ExprKind::Ge};
-        const ExprKind op = ops[rng.uniformInt(0, 3)];
-        std::vector<StmtPtr> blk;
-        blk.push_back(makeAssign(p, makeArrayAccess(mode == 0 ? hiMinus1() : mode == 1 ? lo() : makeIntConst(0))));
-        ExprPtr start = mode == 0 ? lo() : mode == 1 ? loPlus1() : makeIntConst(1);
-        blk.push_back(makeAssign(b, start->clone()));
-        blk.push_back(makeAssign(i, start->clone()));
-        std::vector<StmtPtr> thenBody;
-        thenBody.push_back(makeSwap(makeVar(i), makeVar(b)));
-        thenBody.push_back(makeAssign(b, makeBinOp(ExprKind::Add, makeVar(b), makeIntConst(1))));
-        std::vector<StmtPtr> loopBody;
-        loopBody.push_back(makeIf(makeCompare(op, makeArrayAccess(makeVar(i)), makeVar(p)), std::move(thenBody)));
-        loopBody.push_back(makeAssign(i, makeBinOp(ExprKind::Add, makeVar(i), makeIntConst(1))));
-        loopsUsed++;
-        blk.push_back(makeWhile(makeCompare(ExprKind::Lt, makeVar(i), mode == 0 ? hiMinus1() : hi()), std::move(loopBody)));
-        if (mode != 2 && rng.chance(0.5)) {  // put the pivot at its final cell
-            blk.push_back(mode == 0 ? makeSwap(makeVar(b), hiMinus1())
-                                    : makeSwap(lo(), makeBinOp(ExprKind::Sub, makeVar(b), makeIntConst(1))));
-        }
         auto block = makeBlock();
-        block->body = std::move(blk);
+        block->body = genPartitionStmts(rng, cfg, cfg.recursionCallBias > 0.0 && rng.chance(0.5), loopsUsed);
         return block;
     }
 
@@ -3318,6 +3308,39 @@ BinarySearchWithDecision buildBinarySearchStage2(const std::vector<int>& vars, E
 TspBranchAndBound buildTspBranchAndBoundWithGuard(const std::vector<int>& vars, ExprPtr guard) {
     int loopsUsed = 0;
     return buildTspBranchAndBoundImpl(vars, std::move(guard), loopsUsed);
+}
+
+// Sections 161-162: the statements of a Lomuto partition (variables i = 3, b = 4, p = 5): pivot p, boundary b and scan
+// i start at `start`, `while (i < end) { if (arr[i] CMP p) { swap(arr[i], arr[b]); b = b + 1; } i = i + 1; }`, then an
+// optional pivot-placement swap. Range [0, n), or [v1, v2) when `ranged`. Pivot: last cell, first cell, or key arr[0].
+std::vector<StmtPtr> genPartitionStmts(Random& rng, const GenConfig& cfg, bool ranged, int& loopsUsed) {
+    (void)cfg;
+    const int i = 3, b = 4, p = 5;
+    auto lo = [&]() { return ranged ? makeVar(1) : makeIntConst(0); };
+    auto hi = [&]() { return ranged ? makeVar(2) : makeVar(0); };
+    auto hiMinus1 = [&]() { return makeBinOp(ExprKind::Sub, hi(), makeIntConst(1)); };
+    auto loPlus1 = [&]() { return makeBinOp(ExprKind::Add, lo(), makeIntConst(1)); };
+    const int mode = rng.uniformInt(0, 2);  // 0 last cell, 1 first cell, 2 key arr[0]
+    static const ExprKind ops[] = {ExprKind::Lt, ExprKind::Le, ExprKind::Gt, ExprKind::Ge};
+    const ExprKind op = ops[rng.uniformInt(0, 3)];
+    std::vector<StmtPtr> blk;
+    blk.push_back(makeAssign(p, makeArrayAccess(mode == 0 ? hiMinus1() : mode == 1 ? lo() : makeIntConst(0))));
+    ExprPtr start = mode == 0 ? lo() : mode == 1 ? loPlus1() : makeIntConst(1);
+    blk.push_back(makeAssign(b, start->clone()));
+    blk.push_back(makeAssign(i, start->clone()));
+    std::vector<StmtPtr> thenBody;
+    thenBody.push_back(makeSwap(makeVar(i), makeVar(b)));
+    thenBody.push_back(makeAssign(b, makeBinOp(ExprKind::Add, makeVar(b), makeIntConst(1))));
+    std::vector<StmtPtr> loopBody;
+    loopBody.push_back(makeIf(makeCompare(op, makeArrayAccess(makeVar(i)), makeVar(p)), std::move(thenBody)));
+    loopBody.push_back(makeAssign(i, makeBinOp(ExprKind::Add, makeVar(i), makeIntConst(1))));
+    loopsUsed++;
+    blk.push_back(makeWhile(makeCompare(ExprKind::Lt, makeVar(i), mode == 0 ? hiMinus1() : hi()), std::move(loopBody)));
+    if (mode != 2 && rng.chance(0.5)) {  // put the pivot at its final cell
+        blk.push_back(mode == 0 ? makeSwap(makeVar(b), hiMinus1())
+                                : makeSwap(lo(), makeBinOp(ExprKind::Sub, makeVar(b), makeIntConst(1))));
+    }
+    return blk;
 }
 
 // Section 158: wrap `root` (a Block) in `vK = 0; while (vK < v0) { <root body>; vK = vK + 1; }`, vK in 1..numVars-1
