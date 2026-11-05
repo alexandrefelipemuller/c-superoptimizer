@@ -19,7 +19,8 @@ int main(int argc, char** argv) {
     long count = std::atol(argv[2]);
     unsigned long seed = std::strtoul(argv[3], nullptr, 10);
     int nv = std::atoi(argv[4]);
-    bool aux = std::atoi(argv[5]), rec = std::atoi(argv[6]);
+    double auxBias = std::atof(argv[5]), recBias = std::atof(argv[6]);
+    bool rec = recBias > 0.0;
     double outerRepeat = argc > 7 ? std::atof(argv[7]) : 0.0;
     double adjNested = argc > 8 ? std::atof(argv[8]) : 0.0;
     GenConfig g;
@@ -32,8 +33,8 @@ int main(int argc, char** argv) {
     g.combinatorDistinct = g.followExtended = g.scalarLoop = g.combinatorTriple = g.combinatorRelax = true;
     g.combinatorGrid = g.combinatorTransform = g.distinctAggregate = g.argSentinel = true;
     g.scalarLoopIndexRange = g.combinatorStep = true;
-    if (aux) g.secondArrayBias = 0.3;
-    if (rec) g.recursionCallBias = 0.3;
+    g.secondArrayBias = auxBias;
+    g.recursionCallBias = recBias;
     g.outerRepeatBias = outerRepeat;
     g.adjacentNestedBias = adjNested;
     std::vector<std::vector<int>> inputs;
