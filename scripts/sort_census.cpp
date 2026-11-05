@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
     Interpreter interp(20000, 60, rec);
     Random rng(seed);
     std::set<std::string> seen;
-    long ok = 0;
+    long ok = 0, okCall = 0;
     for (long k = 0; k < count; ++k) {
         auto p = generateRandomProgram(rng, size, g);
         bool good = true;
@@ -68,7 +68,8 @@ int main(int argc, char** argv) {
         if (!good) continue;
         ++ok;
         std::string text = printStmt(*p);
+        if (text.find("call(") != std::string::npos) ++okCall;
         if (seen.insert(text).second) std::cout << "programa:\n" << text << "\n\n";
     }
-    std::cerr << "size " << size << ": " << ok << " sorters in " << count << " (" << seen.size() << " distinct)\n";
+    std::cerr << "size " << size << ": " << ok << " sorters in " << count << " (" << seen.size() << " distinct), " << okCall << " with call\n";
 }
