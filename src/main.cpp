@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iomanip>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <random>
@@ -141,6 +142,7 @@ struct CliArgs {
     bool profileBan = false;      // section 118
     unsigned forbidStmtMask = 0;  // section 118b
     int startSize = 0;            // section 163
+    std::string seedProgramsPath;  // section 163b
     int confirmReseed = 12;  // default since section 97; --confirm-reseed 0 turns it off
     int startLevel = 1;
     int candidatesPerSize = 800;
@@ -240,6 +242,7 @@ bool parseArgs(int argc, char** argv, CliArgs& args) {
         else if (arg == "--step-limit") args.stepLimit = std::stol(next("--step-limit"));
         else if (arg == "--seed") { args.seed = static_cast<uint64_t>(std::stoull(next("--seed"))); args.seedGiven = true; }
         else if (arg == "--restart-on-stall") args.restartOnStall = std::stoi(next("--restart-on-stall"));
+        else if (arg == "--seed-programs") args.seedProgramsPath = next("--seed-programs");
         else if (arg == "--start-size") args.startSize = std::stoi(next("--start-size"));
         else if (arg == "--wall-seconds") args.wallSeconds = std::stod(next("--wall-seconds"));
         else if (arg == "--max-executions") args.maxExecutions = std::stol(next("--max-executions"));
@@ -352,7 +355,7 @@ void printUsage() {
                  "[--composite-bias 0.0] [--local-cond-mutation 0.3] [--no-local-cond-mutation] [--prune-generation] [--role-typed-vars] [--combinator-bias 0.5] [--combinator-v1] [--no-combinator-step] [--no-combinator-state] [--no-combinator-nested] [--no-combinator-frequency] [--combinator-follow] [--no-follow-pointer-inputs] [--no-combinator-orthogonal] [--no-combinator-argbest] [--no-combinator-distinct] [--regression-guard 12] [--no-follow-extended] [--no-scalar-loop] [--no-scalar-loop-index-range] [--no-combinator-triple] [--no-combinator-relax] [--no-combinator-grid] [--no-combinator-transform] [--no-distinct-aggregate] [--no-arg-sentinel] [--first-index] [--prefix-split] [--count-term P] [--square-term P] [--count-mod P] "
                  "[--adaptive-skeleton-bias-rate 0.0] [--adaptive-bias-log path.csv] "
                  "[--second-array-bias 0.0] [--recursion-call-bias 0.0] [--term-expr 0.3] [--prefix-cross 0.3] [--parity-term 0.03] [--pair-find 0.05] [--sum-if 0.05] [--radix 0.03] [--max-const 3] [--digit-loop 0.015] [--counter-mod 0.03] [--signed-parity 0.015] [--dc-shell-search 0.0] [--dc-shell-search-key 0.0] [--dc-shell-search-end 0.0] "
-                 "[--output solutions.json] [--checkpoint-path path.json] [--restart-on-stall K] [--wall-seconds S] [--max-executions N] [--confirm-reseed L] [--profile-novelty W] [--profile-ban] [--forbid-stmt swap|call|assignarray] [--start-size N] "
+                 "[--output solutions.json] [--checkpoint-path path.json] [--restart-on-stall K] [--wall-seconds S] [--max-executions N] [--confirm-reseed L] [--profile-novelty W] [--profile-ban] [--forbid-stmt swap|call|assignarray] [--start-size N] [--seed-programs file] "
                  "[--benchmark] [--benchmark-seeds 5] [--fill-tsp-guard [--soundness-labels] [--metamorphic [--rank-worst-scale]]] [--fill-bsearch-hole [--bsearch-stage 3]] [--ablate-skeleton NAME]\n";
 }
 
@@ -1371,6 +1374,15 @@ int main(int argc, char** argv) {
     config.profileBan = args.profileBan;
     config.forbidStmtMask = args.forbidStmtMask;
     config.startSize = args.startSize;
+    if (!args.seedProgramsPath.empty()) {  // section 163b: programs separated by a line "----"
+        std::ifstream in(args.seedProgramsPath);
+        std::string line, cur;
+        auto flush = [&]() { if (!cur.empty()) config.seedProgramTexts.push_back(cur); cur.clear(); };
+        while (std::getline(in, line)) {
+            if (line == "----") flush(); else cur += line + "\n";
+        }
+        flush();
+    }
     std::unique_ptr<Problem> confirmProblem;
     if (args.confirmReseed > 0) {
         confirmProblem = makeProblem(args.problem, args.numVars, args.seed ^ 0x5bd1e995ULL);

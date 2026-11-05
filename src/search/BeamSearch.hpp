@@ -236,6 +236,9 @@ struct SearchConfig {
     unsigned forbidStmtMask = 0;
     // Section 163: first program size tried (control for the size-order hypothesis). 0/1 = default, byte-identical.
     int startSize = 0;
+    // Section 163b: programs (already parsed) added to the candidate pool at the FIRST size step only, to test whether
+    // selection keeps a known recursive sorter. Empty = default, byte-identical.
+    std::vector<std::string> seedProgramTexts;
     int profileBanBudget = 256;
 };
 

@@ -1,5 +1,7 @@
 #include "search/BeamSearch.hpp"
 
+#include "language/Parser.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -572,6 +574,12 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
             auto candidate = generateRandomProgram(rng, size, config_.genConfig);
             if (dedup.insertIfNew(*candidate)) freshPool.push_back(std::move(candidate));
             guard++;
+        }
+
+        if (size == std::max(1, config_.startSize)) {  // section 163b
+            for (const auto& text : config_.seedProgramTexts) {
+                if (auto parsed = parseProgram(text)) freshPool.push_back(std::move(parsed));
+            }
         }
 
         // Crossover pool: two DISTINCT beam survivors combined via
