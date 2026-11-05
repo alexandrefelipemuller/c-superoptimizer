@@ -234,6 +234,8 @@ struct SearchConfig {
     // the search must reach the problem by another route (e.g. sorting
     // without swap). 0 = nothing forbidden, byte-identical.
     unsigned forbidStmtMask = 0;
+    // Section 163: first program size tried (control for the size-order hypothesis). 0/1 = default, byte-identical.
+    int startSize = 0;
     int profileBanBudget = 256;
 };
 

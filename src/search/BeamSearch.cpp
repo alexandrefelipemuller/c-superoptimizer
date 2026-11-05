@@ -499,7 +499,7 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
     long profileBonusesGiven = 0;
 
     int debugBestPrinted = -1;
-    for (int size = 1; sizeSteps < config_.maxProgramSize && currentLevel <= config_.maxLevel; ++size, ++sizeSteps) {
+    for (int size = std::max(1, config_.startSize); sizeSteps < config_.maxProgramSize && currentLevel <= config_.maxLevel; ++size, ++sizeSteps) {
         if (config_.wallSeconds > 0.0 &&
             std::chrono::duration<double>(std::chrono::steady_clock::now() - searchStart).count() >= config_.wallSeconds) {
             log::info("  wall budget of " + std::to_string(config_.wallSeconds) + "s reached, stopping");
