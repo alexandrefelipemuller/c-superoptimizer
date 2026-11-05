@@ -97,6 +97,7 @@ system generalizes.
 - Outer-repeat move (158, opt-in `--outer-repeat`): fresh bubble sorters 0 -> 24 per 600 000 candidates, but only 1 of 8 searches keeps one (predicted >= 4); the cheaper exchange template takes the beam at equal score. Necessary, not sufficient; levers 2 (insertion) and 3 (recursion) pending.
 - Nested adjacent pass (159, opt-in `--adjacent-nested`): fresh insertion sorters 0 -> 21 per 600 000 candidates and insertion sort kept in 7 of 8 searches (predicted <= 2); novelty alone adds nothing. With 158 and 159 the search holds exchange, insertion and (1 of 8) bubble without a sort skeleton. Lever 3 (recursion: merge, quick) pending.
 - Recursion funnel (160): sibling split calls 1e-4 of fresh candidates, partition leaf <= 1.7e-5, merge take step 0; joint rate below 1e-9, so the missing parts are leaves, not a wrapper. Candidate lever: a generic partition block first (not built).
+- Partition block (161, opt-in `--partition`): the leaf is reached but no recursive sorter appears (0 of 1.2M fresh, 0 of 8 searches); the calls never run on the sorting path. Lever 3b (range-recursion shell around the leaf) next.
 
 - Population diversity, niching, crossover, annealing, score bands as ways to
   find new algorithms (5, 20, 21, 28; later removed). The grammar prior is what
