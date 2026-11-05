@@ -37,6 +37,7 @@ int main(int argc, char** argv) {
     g.countModBias = 0.1;
     if (argc > 5) g.recursionCallBias = std::atof(argv[5]);
     if (argc > 6) g.secondArrayBias = std::atof(argv[6]);
+    if (argc > 7) g.partitionBias = std::atof(argv[7]);
     Random rng(seed);
     std::set<std::string> seen;
     int guard = 0;

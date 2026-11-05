@@ -212,6 +212,11 @@ struct GenConfig {
     // insertion sort when the pass is a compare-swap) or `j = start + 1; while (j <= i) { pass(j); j = j + 1; }`
     // (ascending prefix). Needs two free loop slots. 0 = off, no RNG draw.
     double adjacentNestedBias = 0.0;
+    // Section 161 (opt-in): probability that a loop-capable statement slot (anywhere, also inside if/while) is a
+    // partition block: `p = pivot; b = start; i = start; while (i < end) { if (arr[i] CMP p) { swap(arr[i], arr[b]);
+    // b = b + 1; } i = i + 1; }` with an optional pivot placement swap. The range is [0, n) or, with recursion on,
+    // [v1, v2); the pivot is the last cell, the first cell or the key arr[0]. Needs 6 variables. 0 = off, no draw.
+    double partitionBias = 0.0;
 
     // Section 87: a sixth stateful piece, DistinctCount -- per element, the
     // number of equal elements and whether one came earlier; only first
