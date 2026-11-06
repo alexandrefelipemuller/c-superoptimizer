@@ -101,6 +101,7 @@ system generalizes.
 - Range-recursion shell (162, opt-in `--range-shell`): quick sort appears in fresh generation (172 per 1.2M candidates); by default only 2 of 8 searches keep a correct one (corrected count, 163b), because the 39-43 node exchange template closes the levels first. Merge sort not built.
 - Size-order control (163, opt-in `--start-size`): with sizes below 50 skipped and the shell dominant, 7 of 8 searches keep a real Lomuto quick sort (corrected count: `triage_sorting` files it under ABORT_COST:depth because of the 200-deep recursion cap on sorted n=256; `scripts/recursive_kept.py` counts it). The size-order hypothesis of 162 is supported. Seeding the beam with 172 recursive sorters (163b) does not beat the control.
 - Recursion cap (164, opt-in `--max-recursion-depth`, triage `TRIAGE_MAX_DEPTH`): with cap 1000 the 163 quick sorts triage as OK with core exponent 1.12-1.13 (7 of 8 seeds, 76 programs vs 46 at cap 200; single runs, no noise estimate, so the count gain is suggestive).
+- Joint battery (165, BASE vs ALL four opt-in moves, two rounds of 8 seeds): BASE keeps one family per seed (exchange); ALL keeps exchange + insertion in 16 of 16 seeds and quick sort in 8 of 16 (4 and 4), 2.75 families per seed against 1.00; all six predictions hold, rounds agree within 1 seed. Promotion candidate; leave-one-out needed first, nothing promoted. Bubble stays rare (1 genuine of 16).
 
 - Population diversity, niching, crossover, annealing, score bands as ways to
   find new algorithms (5, 20, 21, 28; later removed). The grammar prior is what
