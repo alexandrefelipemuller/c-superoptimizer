@@ -6,20 +6,26 @@ Families, from the printed text:
   quick     contains call( and the range guard `(v2 - v1) > 1` (recursive partition shell)
   insertion adjacent compare-swap in two nested whiles whose inner counter starts from the outer counter (`vK = vJ;`)
   bubble    same, inner counter restarts from a constant
+  merge     the quick test, plus a copy through aux and writes `arr[vK] = aux[...]` (section 170)
+  selection running-minimum index then swap(arr[i], arr[m]) (section 170)
   exchange  compare-swap of the same pair in two nested whiles, not adjacent
 Usage: sort_families.py RUN_ROOT
 """
 import glob, json, os, re, sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-FAM = ['exchange', 'bubble', 'insertion', 'quick']
+FAM = ['exchange', 'bubble', 'insertion', 'quick', 'selection', 'merge']
 CMP = re.compile(r"^(?:if|while) \(\((arr\[.*?\]) (<|>|<=|>=) (arr\[.*?\])\)\) \{$")
 SW = re.compile(r"^swap\((arr\[.*?\]), (arr\[.*?\])\);$")
 
 def classify(text):
     out = set()
     if 'call(' in text and '(v2 - v1) > 1' in text:
-        out.add('quick')
+        out.add('merge' if re.search(r'arr\[v\d+\] = aux\[', text) else 'quick')
+    # selection: running-minimum index (`if (arr[j] CMP arr[m]) { m = j; }`) followed by swap(arr[i], arr[m]) (section 170)
+    for mm in re.finditer(r'if \(\(arr\[(v\d+)\] [<>]=? arr\[(v\d+)\]\)\) \{\n\s*\2 = \1;', text):
+        if re.search(r'swap\(arr\[v\d+\], arr\[' + mm.group(2) + r'\]\);', text):
+            out.add('selection')
     lines = [l for l in text.split('\n') if l.strip()]
     stack = []
     for idx, l in enumerate(lines):

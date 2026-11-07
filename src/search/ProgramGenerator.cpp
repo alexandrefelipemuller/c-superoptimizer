@@ -13,6 +13,8 @@
 namespace algosearch {
 
 std::vector<StmtPtr> genPartitionStmts(Random& rng, const GenConfig& cfg, bool ranged, int& loopsUsed);  // sections 161-162
+std::vector<StmtPtr> genSelectionStmts(Random& rng, bool ranged, int& loopsUsed);  // section 170
+std::vector<StmtPtr> genMergeShellBody(Random& rng, int& loopsUsed);  // section 170
 
 namespace {
 
@@ -3053,6 +3055,20 @@ StmtPtr genStmt(Random& rng, int depthBudget, const GenConfig& cfg, int& loopsUs
                       std::move(body));
     }
 
+    // Section 170: merge-sort shell (`--merge-shell`).
+    if (!insideIf && !insideWhile && cfg.mergeShellBias > 0.0 && cfg.recursionCallBias > 0.0 && cfg.numVars >= 7 &&
+        canLoop && depthBudget > 0 && rng.chance(cfg.mergeShellBias)) {
+        return makeIf(makeCompare(ExprKind::Gt, makeBinOp(ExprKind::Sub, makeVar(2), makeVar(1)), makeIntConst(1)),
+                      genMergeShellBody(rng, loopsUsed));
+    }
+
+    // Section 170: selection block (`--selection-block`).
+    if (canLoop && cfg.numVars >= 6 && depthBudget > 1 && cfg.selectionBias > 0.0 && rng.chance(cfg.selectionBias)) {
+        auto block = makeBlock();
+        block->body = genSelectionStmts(rng, cfg.recursionCallBias > 0.0 && rng.chance(0.5), loopsUsed);
+        return block;
+    }
+
     // Section 161: partition block (conditional swap that advances a boundary).
     if (canLoop && cfg.numVars >= 6 && depthBudget > 0 && cfg.partitionBias > 0.0 && rng.chance(cfg.partitionBias)) {
         auto block = makeBlock();
@@ -3341,6 +3357,74 @@ std::vector<StmtPtr> genPartitionStmts(Random& rng, const GenConfig& cfg, bool r
                                 : makeSwap(lo(), makeBinOp(ExprKind::Sub, makeVar(b), makeIntConst(1))));
     }
     return blk;
+}
+
+// Section 170: selection block (variables i = 3, m = 4, j = 5), see GenConfig::selectionBias.
+std::vector<StmtPtr> genSelectionStmts(Random& rng, bool ranged, int& loopsUsed) {
+    const int i = 3, m = 4, j = 5;
+    auto lo = [&]() { return ranged ? makeVar(1) : makeIntConst(0); };
+    auto hi = [&]() { return ranged ? makeVar(2) : makeVar(0); };
+    static const ExprKind ops[] = {ExprKind::Lt, ExprKind::Lt, ExprKind::Le, ExprKind::Gt, ExprKind::Ge};
+    const ExprKind op = ops[rng.uniformInt(0, 4)];
+    std::vector<StmtPtr> inner;
+    std::vector<StmtPtr> thenBody;
+    thenBody.push_back(makeAssign(m, makeVar(j)));
+    inner.push_back(makeIf(makeCompare(op, makeArrayAccess(makeVar(j)), makeArrayAccess(makeVar(m))), std::move(thenBody)));
+    inner.push_back(makeAssign(j, makeBinOp(ExprKind::Add, makeVar(j), makeIntConst(1))));
+    std::vector<StmtPtr> outer;
+    outer.push_back(makeAssign(m, makeVar(i)));
+    outer.push_back(makeAssign(j, makeBinOp(ExprKind::Add, makeVar(i), makeIntConst(1))));
+    outer.push_back(makeWhile(makeCompare(ExprKind::Lt, makeVar(j), hi()), std::move(inner)));
+    outer.push_back(makeSwap(makeVar(i), makeVar(m)));
+    outer.push_back(makeAssign(i, makeBinOp(ExprKind::Add, makeVar(i), makeIntConst(1))));
+    std::vector<StmtPtr> blk;
+    blk.push_back(makeAssign(i, lo()));
+    blk.push_back(makeWhile(makeCompare(ExprKind::Lt, makeVar(i), hi()), std::move(outer)));
+    loopsUsed += 2;
+    return blk;
+}
+
+// Section 170: body of the merge-sort shell (variables mid = 3, i = 4, j = 5, k = 6; range [v1, v2)).
+std::vector<StmtPtr> genMergeShellBody(Random& rng, int& loopsUsed) {
+    const int mid = 3, i = 4, j = 5, k = 6;
+    auto inc = [&](int v) { return makeAssign(v, makeBinOp(ExprKind::Add, makeVar(v), makeIntConst(1))); };
+    std::vector<StmtPtr> body;
+    if (rng.chance(0.5)) {
+        body.push_back(makeAssign(mid, makeBinOp(ExprKind::Div, makeBinOp(ExprKind::Add, makeVar(1), makeVar(2)), makeIntConst(2))));
+    } else {
+        body.push_back(makeAssign(mid, makeBinOp(ExprKind::Add, makeVar(1),
+                                                 makeBinOp(ExprKind::Div, makeBinOp(ExprKind::Sub, makeVar(2), makeVar(1)), makeIntConst(2)))));
+    }
+    body.push_back(makeCall(makeVar(1), makeVar(mid)));
+    body.push_back(makeCall(makeVar(mid), makeVar(2)));
+    // copy [v1, v2) into aux
+    body.push_back(makeAssign(i, makeVar(1)));
+    std::vector<StmtPtr> copy;
+    copy.push_back(makeAssignAux(makeVar(i), makeArrayAccess(makeVar(i))));
+    copy.push_back(inc(i));
+    body.push_back(makeWhile(makeCompare(ExprKind::Lt, makeVar(i), makeVar(2)), std::move(copy)));
+    // merge back
+    static const ExprKind ops[] = {ExprKind::Le, ExprKind::Le, ExprKind::Lt, ExprKind::Ge, ExprKind::Gt};
+    const ExprKind op = ops[rng.uniformInt(0, 4)];
+    auto takeFrom = [&](int src) {
+        std::vector<StmtPtr> s;
+        s.push_back(makeAssignArray(makeVar(k), makeAuxAccess(makeVar(src))));
+        s.push_back(inc(src));
+        return s;
+    };
+    std::vector<StmtPtr> tie;
+    tie.push_back(makeIf(makeCompare(op, makeAuxAccess(makeVar(i)), makeAuxAccess(makeVar(j))), takeFrom(i), takeFrom(j)));
+    std::vector<StmtPtr> rightEmpty;
+    rightEmpty.push_back(makeIf(makeCompare(ExprKind::Ge, makeVar(j), makeVar(2)), takeFrom(i), std::move(tie)));
+    std::vector<StmtPtr> loop;
+    loop.push_back(makeIf(makeCompare(ExprKind::Ge, makeVar(i), makeVar(mid)), takeFrom(j), std::move(rightEmpty)));
+    loop.push_back(inc(k));
+    body.push_back(makeAssign(i, makeVar(1)));
+    body.push_back(makeAssign(j, makeVar(mid)));
+    body.push_back(makeAssign(k, makeVar(1)));
+    body.push_back(makeWhile(makeCompare(ExprKind::Lt, makeVar(k), makeVar(2)), std::move(loop)));
+    loopsUsed += 2;
+    return body;
 }
 
 // Section 158: wrap `root` (a Block) in `vK = 0; while (vK < v0) { <root body>; vK = vK + 1; }`, vK in 1..numVars-1

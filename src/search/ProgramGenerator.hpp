@@ -221,6 +221,14 @@ struct GenConfig {
     // <partition block on [v1, v2)>; call(v1, b or b-1); call(b or b+1, v2); }`: the split is the partition boundary.
     // Needs recursionCallBias > 0 (lo/hi seeding) and 6 variables. 0 = off, no RNG draw.
     double rangeShellBias = 0.0;
+    // Section 170 (opt-in): probability that a loop-capable statement slot is a selection block: `i = start;
+    // while (i < end) { m = i; j = i + 1; while (j < end) { if (arr[j] CMP arr[m]) { m = j; } j = j + 1; }
+    // swap(arr[i], arr[m]); i = i + 1; }` over [0, n) or [v1, v2). Needs 6 variables and two free loop slots. 0 = off.
+    double selectionBias = 0.0;
+    // Section 170 (opt-in): probability that a top-level slot is the merge-sort shell `if (v2 - v1 > 1) { mid = ...;
+    // call(v1, mid); call(mid, v2); <copy [v1, v2) into aux; merge back into arr> }`. Needs recursionCallBias > 0
+    // and 7 variables. 0 = off, no RNG draw.
+    double mergeShellBias = 0.0;
 
     // Section 87: a sixth stateful piece, DistinctCount -- per element, the
     // number of equal elements and whether one came earlier; only first
