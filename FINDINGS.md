@@ -183,3 +183,4 @@ system generalizes.
 | cleanup | 125-125c |
 
 The per-section list with chunk and line is `docs/findings/INDEX.md`.
+- 170-172: selection block and merge shell moves, calibration battery, large families run reaches 5 families (exchange, insertion, quick, selection, merge); moves stay opt-in, one arm per family
