@@ -302,3 +302,6 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 165. Joint battery of the opt-in sorting moves, two rounds: ALL keeps 2.75 families per seed vs 1.00 for BASE (insertion 16/16, quick 8/16), predictions all hold, rounds agree; promotion candidate pending leave-one-out | 11_sections_121-125.md | 1693 |
 | 166. Leave-one-out of the four sorting moves: outer repeat droppable, adjacent-nested and range-shell needed, partition ambiguous in both rounds (consistently positive, kept); without the adjacent pass quick sort is kept in 8 of 8 seeds | 11_sections_121-125.md | 1719 |
 | 167. Cross-problem battery of the sorting moves: 757 vs 759 solved, 75 of 77 problems equal, aggregate rule not met, moves stay opt-in | 11_sections_121-125.md | 1749 |
+| 170. Selection block and merge shell moves (opt-in); counting sort structurally unreachable | 11_sections_121-125.md | 1782 |
+| 171. Calibration battery: five families reached by arm, merge 1 of 4 in the shared arm | 11_sections_121-125.md | 1790 |
+| 172. Large families run: five families discovered, merge sort in 15 of 16 merge-arm seeds, quick in 10 of 10 quick-arm seeds | 11_sections_121-125.md | 1804 |
