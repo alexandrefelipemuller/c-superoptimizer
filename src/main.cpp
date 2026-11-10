@@ -611,6 +611,20 @@ std::unique_ptr<Problem> makeProblem(const std::string& name, int numVars, uint6
 // check, times the survivors across a range of input sizes, fits an
 // empirical time-complexity curve to each, and reports them ranked fastest
 // first.
+// Section 173: programs of a --seed-programs file, separated by a line "----".
+std::vector<std::string> loadSeedPrograms(const std::string& path) {
+    std::vector<std::string> out;
+    if (path.empty()) return out;
+    std::ifstream in(path);
+    std::string line, cur;
+    auto flush = [&]() { if (!cur.empty()) out.push_back(cur); cur.clear(); };
+    while (std::getline(in, line)) {
+        if (line == "----") flush(); else cur += line + "\n";
+    }
+    flush();
+    return out;
+}
+
 void runBenchmarkMode(const CliArgs& args) {
     struct Candidate {
         std::string programText;
@@ -632,6 +646,9 @@ void runBenchmarkMode(const CliArgs& args) {
         config.maxProgramSize = args.maxProgramSize;
         config.stepLimit = args.stepLimit;
         config.startLevel = args.startLevel;
+        config.startSize = args.startSize;                    // section 173: the benchmark path ignored these three
+        config.maxRecursionDepth = args.maxRecursionDepth;
+        config.seedProgramTexts = loadSeedPrograms(args.seedProgramsPath);
         config.maxLevel = args.maxN;
         config.seed = seed;
         config.candidatesPerSize = args.candidatesPerSize;

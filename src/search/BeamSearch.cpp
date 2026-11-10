@@ -576,9 +576,13 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
             guard++;
         }
 
+        size_t injectedSeeds = 0;
         if (size == std::max(1, config_.startSize)) {  // section 163b
             for (const auto& text : config_.seedProgramTexts) {
-                if (auto parsed = parseProgram(text)) freshPool.push_back(std::move(parsed));
+                if (auto parsed = parseProgram(text)) {
+                    freshPool.push_back(std::move(parsed));
+                    injectedSeeds++;
+                }
             }
         }
 
@@ -615,6 +619,13 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
                          trackCorrectness, config_.speedBonusWeight, config_.stepLimit, debugBehavior);
         scoreCandidates(crossoverPool, instances, problem_, interp, threadCount, scored, grownPool.size() + freshPool.size(),
                          timeouts, errors, trackCorrectness, config_.speedBonusWeight, config_.stepLimit, debugBehavior);
+        if (injectedSeeds > 0 && std::getenv("ALGOSEARCH_DEBUG_SEED") != nullptr) {  // section 173: seed diagnostic
+            for (size_t k = 0; k < injectedSeeds; ++k) {
+                const CandidateRecord& r = scored[grownPool.size() + freshPool.size() - injectedSeeds + k];
+                std::cerr << "[seed-debug] level " << currentLevel << " size-step " << size << " seed " << k << " score " << r.score
+                          << "/" << r.totalTests << " program size " << r.size << "\n";
+            }
+        }
         totalCandidatesScored += static_cast<long>(scored.size());
         executionsUsed += static_cast<long>(scored.size()) * static_cast<long>(instances.size());
 
