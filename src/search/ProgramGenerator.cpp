@@ -3451,6 +3451,21 @@ Program generateRandomProgram(Random& rng, int targetSize, const GenConfig& cfg)
     auto root = makeBlock();
     int loopsUsed = 0;
     int guard = 0;
+    // Section 176: free prefix (combinators off) followed by one combinator block.
+    if (cfg.prefixCombinatorBias > 0.0 && cfg.combinatorBias > 0.0 && cfg.numVars >= 8 && cfg.maxLoops >= 3 &&
+        rng.chance(cfg.prefixCombinatorBias)) {
+        GenConfig prefixCfg = cfg;
+        prefixCfg.combinatorBias = 0.0;
+        prefixCfg.prefixCombinatorBias = 0.0;
+        const int prefixTarget = std::max(targetSize / 2, 1);
+        while (root->size() < prefixTarget && guard < 50) {
+            guard++;
+            root->body.push_back(genStmt(rng, cfg.maxBlockDepth, prefixCfg, loopsUsed));
+            if (static_cast<int>(root->body.size()) > cfg.maxStatementsPerBlock * 4) break;
+        }
+        root->body.push_back(genCombinatorBlock(rng, cfg, loopsUsed));
+        return root;
+    }
     while (root->size() < targetSize && guard < 200) {
         guard++;
         root->body.push_back(genStmt(rng, cfg.maxBlockDepth, cfg, loopsUsed));

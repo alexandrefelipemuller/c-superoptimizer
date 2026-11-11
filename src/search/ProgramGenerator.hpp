@@ -224,6 +224,9 @@ struct GenConfig {
     // Section 170 (opt-in): probability that a loop-capable statement slot is a selection block: `i = start;
     // while (i < end) { m = i; j = i + 1; while (j < end) { if (arr[j] CMP arr[m]) { m = j; } j = j + 1; }
     // swap(arr[i], arr[m]); i = i + 1; }` over [0, n) or [v1, v2). Needs 6 variables and two free loop slots. 0 = off.
+    // Section 176: with this probability a root program is a free prefix (generated with combinators off, so sort
+    // moves can build it) followed by one combinator block. Needs combinatorBias > 0. Opt-in, default 0.
+    double prefixCombinatorBias = 0.0;
     double selectionBias = 0.0;
     // Section 170 (opt-in): probability that a top-level slot is the merge-sort shell `if (v2 - v1 > 1) { mid = ...;
     // call(v1, mid); call(mid, v2); <copy [v1, v2) into aux; merge back into arr> }`. Needs recursionCallBias > 0

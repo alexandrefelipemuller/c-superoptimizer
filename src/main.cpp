@@ -209,6 +209,7 @@ struct CliArgs {
     double adjacentNestedBias = 0.0; // section 159 (opt-in)
     double partitionBias = 0.0;      // section 161 (opt-in)
     double selectionBias = 0.0;      // section 170 (opt-in)
+    double prefixCombinatorBias = 0.0;  // section 176 (opt-in)
     double mergeShellBias = 0.0;     // section 170 (opt-in)
     double rangeShellBias = 0.0;     // section 162 (opt-in)
     double countModBias = 0.1;       // section 138; default (--count-mod 0 restores the old grammar)
@@ -322,6 +323,7 @@ bool parseArgs(int argc, char** argv, CliArgs& args) {
         else if (arg == "--square-term") args.squareTermBias = std::stod(next("--square-term"));
         else if (arg == "--range-shell") args.rangeShellBias = std::stod(next("--range-shell"));
         else if (arg == "--partition") args.partitionBias = std::stod(next("--partition"));
+        else if (arg == "--prefix-combinator") args.prefixCombinatorBias = std::stod(next("--prefix-combinator"));
         else if (arg == "--selection-block") args.selectionBias = std::stod(next("--selection-block"));
         else if (arg == "--merge-shell") args.mergeShellBias = std::stod(next("--merge-shell"));
         else if (arg == "--adjacent-nested") args.adjacentNestedBias = std::stod(next("--adjacent-nested"));
@@ -718,6 +720,7 @@ void runBenchmarkMode(const CliArgs& args) {
         config.genConfig.adjacentNestedBias = args.adjacentNestedBias;
         config.genConfig.partitionBias = args.partitionBias;
         config.genConfig.selectionBias = args.selectionBias;
+        config.genConfig.prefixCombinatorBias = args.prefixCombinatorBias;
         config.genConfig.mergeShellBias = args.mergeShellBias;
         config.genConfig.rangeShellBias = args.rangeShellBias;
     config.genConfig.dcShellSearchKey = args.dcShellSearchKey;
@@ -1388,6 +1391,7 @@ int main(int argc, char** argv) {
         config.genConfig.adjacentNestedBias = args.adjacentNestedBias;
         config.genConfig.partitionBias = args.partitionBias;
         config.genConfig.selectionBias = args.selectionBias;
+        config.genConfig.prefixCombinatorBias = args.prefixCombinatorBias;
         config.genConfig.mergeShellBias = args.mergeShellBias;
         config.genConfig.rangeShellBias = args.rangeShellBias;
     config.genConfig.dcShellSearchKey = args.dcShellSearchKey;
