@@ -305,3 +305,9 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 170. Selection block and merge shell moves (opt-in); counting sort structurally unreachable | 11_sections_121-125.md | 1782 |
 | 171. Calibration battery: five families reached by arm, merge 1 of 4 in the shared arm | 11_sections_121-125.md | 1790 |
 | 172. Large families run: five families discovered, merge sort in 15 of 16 merge-arm seeds, quick in 10 of 10 quick-arm seeds | 11_sections_121-125.md | 1804 |
+| 173. Transfer of the sorting moves to neighbouring problems: 0 solved | 11_sections_121-125.md | 1822 |
+| 174. Fair transfer test with a seeded half: sort block is not the bottleneck | 11_sections_121-125.md | 1848 |
+| 175. Adjacent pass alone: 0/50 with generic search, 50/50 with pieces | 11_sections_121-125.md | 1862 |
+| 176. Free prefix + combinator block (`--prefix-combinator`): min_gap 1 -> 10 | 11_sections_121-125.md | 1887 |
+| 177. Prefix composition without sorting skeletons: min_gap 0 -> 10, max_gap_sorted 1 -> 10 | 11_sections_121-125.md | 1911 |
+| 178. Prefix with merge/quick, suite cost (755 vs 759, opt-in), sorter library composes 10/10 (178a/b/c) | 11_sections_121-125.md | 1932 |

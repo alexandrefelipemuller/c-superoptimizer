@@ -3445,6 +3445,29 @@ void wrapOuterRepeat(Program& root, const GenConfig& cfg) {
     root->body.push_back(makeWhile(makeCompare(ExprKind::Lt, makeVar(k), makeVar(0)), std::move(body)));
 }
 
+namespace {
+bool containsCall(const Stmt& s) {
+    if (s.kind == StmtKind::Call) return true;
+    for (const auto& c : s.body) if (containsCall(*c)) return true;
+    for (const auto& c : s.elseBody) if (containsCall(*c)) return true;
+    return false;
+}
+
+// Section 176/178c: appends one combinator block. If the prefix recurses (a Call re-enters the whole program), the block
+// is wrapped in `if ((v2 - v1) >= v0)` so it runs only in the top-level call (sub-calls have strictly shorter ranges).
+void appendCombinatorBlock(Stmt& root, Random& rng, const GenConfig& cfg, int& loopsUsed) {
+    auto block = genCombinatorBlock(rng, cfg, loopsUsed);
+    if (containsCall(root)) {
+        std::vector<StmtPtr> body;
+        body.push_back(std::move(block));
+        root.body.push_back(makeIf(makeCompare(ExprKind::Ge, makeBinOp(ExprKind::Sub, makeVar(2), makeVar(1)), makeVar(0)),
+                                   std::move(body)));
+    } else {
+        root.body.push_back(std::move(block));
+    }
+}
+}  // namespace
+
 Program generateRandomProgram(Random& rng, int targetSize, const GenConfig& cfg) {
     const bool wrap = cfg.outerRepeatBias > 0.0 && rng.chance(cfg.outerRepeatBias);
     if (wrap) targetSize = std::max(targetSize - 8, 1);
@@ -3463,7 +3486,7 @@ Program generateRandomProgram(Random& rng, int targetSize, const GenConfig& cfg)
             root->body.push_back(genStmt(rng, cfg.maxBlockDepth, prefixCfg, loopsUsed));
             if (static_cast<int>(root->body.size()) > cfg.maxStatementsPerBlock * 4) break;
         }
-        root->body.push_back(genCombinatorBlock(rng, cfg, loopsUsed));
+        appendCombinatorBlock(*root, rng, cfg, loopsUsed);
         return root;
     }
     while (root->size() < targetSize && guard < 200) {
@@ -3480,27 +3503,10 @@ Program generateRandomProgram(Random& rng, int targetSize, const GenConfig& cfg)
     return root;
 }
 
-namespace {
-bool containsCall(const Stmt& s) {
-    if (s.kind == StmtKind::Call) return true;
-    for (const auto& c : s.body) if (containsCall(*c)) return true;
-    for (const auto& c : s.elseBody) if (containsCall(*c)) return true;
-    return false;
-}
-}  // namespace
-
 Program generatePrefixedProgram(Random& rng, const Stmt& prefix, const GenConfig& cfg) {
     auto root = prefix.clone();
     int loopsUsed = countLoops(*root);
-    auto block = genCombinatorBlock(rng, cfg, loopsUsed);
-    if (containsCall(*root)) {
-        std::vector<StmtPtr> body;
-        body.push_back(std::move(block));
-        root->body.push_back(makeIf(makeCompare(ExprKind::Ge, makeBinOp(ExprKind::Sub, makeVar(2), makeVar(1)), makeVar(0)),
-                                    std::move(body)));
-    } else {
-        root->body.push_back(std::move(block));
-    }
+    appendCombinatorBlock(*root, rng, cfg, loopsUsed);
     return root;
 }
 
