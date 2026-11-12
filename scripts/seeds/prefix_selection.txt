@@ -1,0 +1,12 @@
+while ((v3 < v2)) {
+  v4 = v3;
+  v5 = (v3 + 1);
+  while ((v5 < v2)) {
+    if ((arr[v5] < arr[v4])) {
+      v4 = v5;
+    }
+    v5 = (v5 + 1);
+  }
+  swap(arr[v3], arr[v4]);
+  v3 = (v3 + 1);
+}

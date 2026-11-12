@@ -576,6 +576,18 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
             guard++;
         }
 
+        if (!config_.prefixProgramTexts.empty() && config_.prefixLibraryCount > 0 && config_.genConfig.combinatorBias > 0.0) {
+            std::vector<Program> prefixes;
+            for (const auto& text : config_.prefixProgramTexts) {
+                if (auto parsed = parseProgram(text)) prefixes.push_back(std::move(parsed));
+            }
+            for (int c = 0; c < config_.prefixLibraryCount && !prefixes.empty(); ++c) {
+                const auto& pre = prefixes[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(prefixes.size()) - 1))];
+                auto candidate = generatePrefixedProgram(rng, *pre, config_.genConfig);
+                if (dedup.insertIfNew(*candidate)) freshPool.push_back(std::move(candidate));
+            }
+        }
+
         size_t injectedSeeds = 0;
         if (size == std::max(1, config_.startSize)) {  // section 163b
             for (const auto& text : config_.seedProgramTexts) {

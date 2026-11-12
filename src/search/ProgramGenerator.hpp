@@ -397,6 +397,9 @@ BinarySearchWithDecision buildBinarySearchStage2(const std::vector<int>& vars, E
                                                  StmtPtr elseMove);
 
 Program generateRandomProgram(Random& rng, int targetSize, const GenConfig& cfg);
+// Section 178c: a copy of `prefix` followed by one combinator block. A prefix that recurses (contains a Call) re-enters
+// the whole program, so the block is guarded to run only in the top-level call (range length >= v0).
+Program generatePrefixedProgram(Random& rng, const Stmt& prefix, const GenConfig& cfg);
 
 // Clones `seed` and grows it by inserting freshly generated statements into
 // randomly chosen blocks until its size reaches (at least) `targetSize`, or

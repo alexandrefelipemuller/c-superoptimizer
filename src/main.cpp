@@ -144,6 +144,8 @@ struct CliArgs {
     int startSize = 0;            // section 163
     long maxRecursionDepth = 200;  // section 164
     std::string seedProgramsPath;  // section 163b
+    std::string prefixProgramsPath;  // section 178c
+    int prefixLibraryCount = 0;
     int confirmReseed = 12;  // default since section 97; --confirm-reseed 0 turns it off
     int startLevel = 1;
     int candidatesPerSize = 800;
@@ -246,6 +248,8 @@ bool parseArgs(int argc, char** argv, CliArgs& args) {
         else if (arg == "--step-limit") args.stepLimit = std::stol(next("--step-limit"));
         else if (arg == "--seed") { args.seed = static_cast<uint64_t>(std::stoull(next("--seed"))); args.seedGiven = true; }
         else if (arg == "--restart-on-stall") args.restartOnStall = std::stoi(next("--restart-on-stall"));
+        else if (arg == "--prefix-programs") args.prefixProgramsPath = next("--prefix-programs");
+        else if (arg == "--prefix-library-count") args.prefixLibraryCount = std::stoi(next("--prefix-library-count"));
         else if (arg == "--seed-programs") args.seedProgramsPath = next("--seed-programs");
         else if (arg == "--max-recursion-depth") args.maxRecursionDepth = std::stol(next("--max-recursion-depth"));
         else if (arg == "--start-size") args.startSize = std::stoi(next("--start-size"));
@@ -651,6 +655,8 @@ void runBenchmarkMode(const CliArgs& args) {
         config.startSize = args.startSize;                    // section 173: the benchmark path ignored these three
         config.maxRecursionDepth = args.maxRecursionDepth;
         config.seedProgramTexts = loadSeedPrograms(args.seedProgramsPath);
+        config.prefixProgramTexts = loadSeedPrograms(args.prefixProgramsPath);
+        config.prefixLibraryCount = args.prefixLibraryCount;
         config.maxLevel = args.maxN;
         config.seed = seed;
         config.candidatesPerSize = args.candidatesPerSize;
@@ -1406,6 +1412,8 @@ int main(int argc, char** argv) {
     config.forbidStmtMask = args.forbidStmtMask;
     config.startSize = args.startSize;
     config.maxRecursionDepth = args.maxRecursionDepth;
+    config.prefixProgramTexts = loadSeedPrograms(args.prefixProgramsPath);
+    config.prefixLibraryCount = args.prefixLibraryCount;
     if (!args.seedProgramsPath.empty()) {  // section 163b: programs separated by a line "----"
         std::ifstream in(args.seedProgramsPath);
         std::string line, cur;

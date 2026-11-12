@@ -241,6 +241,10 @@ struct SearchConfig {
     // Section 163b: programs (already parsed) added to the candidate pool at the FIRST size step only, to test whether
     // selection keeps a known recursive sorter. Empty = default, byte-identical.
     std::vector<std::string> seedProgramTexts;
+    // Section 178c: sorter programs used as fixed prefixes; each size step adds `prefixLibraryCount` candidates made of a
+    // random prefix plus a free combinator block. Empty / 0 = default, byte-identical.
+    std::vector<std::string> prefixProgramTexts;
+    int prefixLibraryCount = 0;
     int profileBanBudget = 256;
 };
 

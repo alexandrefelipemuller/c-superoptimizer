@@ -3480,6 +3480,30 @@ Program generateRandomProgram(Random& rng, int targetSize, const GenConfig& cfg)
     return root;
 }
 
+namespace {
+bool containsCall(const Stmt& s) {
+    if (s.kind == StmtKind::Call) return true;
+    for (const auto& c : s.body) if (containsCall(*c)) return true;
+    for (const auto& c : s.elseBody) if (containsCall(*c)) return true;
+    return false;
+}
+}  // namespace
+
+Program generatePrefixedProgram(Random& rng, const Stmt& prefix, const GenConfig& cfg) {
+    auto root = prefix.clone();
+    int loopsUsed = countLoops(*root);
+    auto block = genCombinatorBlock(rng, cfg, loopsUsed);
+    if (containsCall(*root)) {
+        std::vector<StmtPtr> body;
+        body.push_back(std::move(block));
+        root->body.push_back(makeIf(makeCompare(ExprKind::Ge, makeBinOp(ExprKind::Sub, makeVar(2), makeVar(1)), makeVar(0)),
+                                    std::move(body)));
+    } else {
+        root->body.push_back(std::move(block));
+    }
+    return root;
+}
+
 Program growProgram(const Stmt& seed, int targetSize, Random& rng, const GenConfig& cfg) {
     auto root = seed.clone();
     int loopsUsed = countLoops(*root);
