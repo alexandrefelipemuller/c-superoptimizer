@@ -314,3 +314,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 179. Free recursive prefix with top-level guard: merge 10/10 and quick 7-9/10 compose with the pass, fixes 178a | 11_sections_121-125.md | 1995 |
 | 180. Full sorting profile on the suite: 752 vs 759, promotion rule not met, stays opt-in | 11_sections_121-125.md | 2016 |
 | 181. One sorting profile through min_gap/max_gap_sorted: 60/60 solved, two families (selection 46, merge 14), quick 0 | 11_sections_121-125.md | 2030 |
+| 182. Retuned partition/range-shell: one profile reaches selection, merge and quick (P3: 38/14/9 of 60) | 11_sections_121-125.md | 2046 |
