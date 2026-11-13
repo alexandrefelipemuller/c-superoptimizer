@@ -324,3 +324,5 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 188. (results, first run) n = 0 hole gave one wrong result; verification, emitter-cost and timing-resolution defects fixed; is_pow2 1.23-1.31x | 11_sections_121-125.md | 2121 |
 | 188b. (registered) Rerun after the fixes, seeds 4-6, inline timing for scalar functions | 11_sections_121-125.md | 2131 |
 | 188b. (results) 45/45 equivalent; one gain (is_pow2 1.15-1.34x); model vs measured Spearman 0.12 | 11_sections_121-125.md | 2135 |
+| 189. (registered) Phase 3b: compiled timing of candidates inside the superopt loop (--time-top) | 11_sections_121-125.md | 2149 |
+| 189. (results) No regressions, 45/45 equivalent; is_pow2 1.2x and sign 1.64x (a gain the model cannot see) | 11_sections_121-125.md | 2156 |

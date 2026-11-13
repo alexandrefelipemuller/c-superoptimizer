@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <chrono>
 #include <climits>
+#include <cmath>
+#include <memory>
 #include <iostream>
 #include <optional>
 #include <unordered_set>
@@ -11,6 +13,7 @@
 #include "interpreter/Interpreter.hpp"
 #include "language/PrettyPrinter.hpp"
 #include "search/Benchmark.hpp"
+#include "superopt/CompiledTimer.hpp"
 
 namespace algosearch {
 
@@ -189,6 +192,14 @@ struct Candidate {
     long long cost = 0;
     int fails = 0;
     int size = 0;
+    bool fromTimed = false;  // a mutant of a timed, measured-fast parent
+};
+
+struct Timed {
+    Program program;
+    std::string key;
+    double speedup = 0;
+    long long cost = 0;
 };
 
 }  // namespace
@@ -336,15 +347,97 @@ SuperoptResult Superoptimizer::run() {
     int failCap = std::max(1, static_cast<int>(config_.maxFailFraction * static_cast<double>(tests_.size())));
     result.trajectory.push_back({0.0, bestCost});
 
+    // Phase 3b: compiled timing against the original, in one process.
+    std::unique_ptr<CompiledTimer> timer;
+    std::vector<Timed> timed;
+    std::unordered_set<std::string> timedKeys;
+    auto emit = [&](const Stmt& p) -> std::optional<std::string> {
+        try {
+            return emitCFunction(p, abi);
+        } catch (const CImportError&) {
+            return std::nullopt;
+        }
+    };
+    if (config_.timeTopK > 0) {
+        timer = std::make_unique<CompiledTimer>(config_.originalSource, abi, workload_, config_.workDir);
+        double spread = 0;
+        std::vector<double> self;
+        for (int i = 0; i < 3; ++i) {
+            CompiledTimer::Timing t = timer->time(config_.originalSource);
+            if (!t.ok) throw CImportError("compiled timing failed: " + t.error);
+            self.push_back(t.speedup);
+            spread = std::max(spread, std::abs(1.0 - t.speedup));
+        }
+        std::sort(self.begin(), self.end());
+        result.selfControl = self[1];
+        result.noiseThreshold = std::max(0.03, 2.0 * spread);
+        if (auto c = emit(problem_.referenceProgram())) {
+            CompiledTimer::Timing t = timer->time(*c);
+            if (t.ok) result.emittedReference = t.speedup;
+        }
+        result.timings = 4;
+    }
+    // Times up to timeTopK untimed correct candidates of the beam: the
+    // model's best, mutants of measured-fast parents, then random ones (the
+    // model alone is a poor guide, log 188b). Each is checked for
+    // counterexamples first, so the timed archive holds only programs that
+    // passed the same CEGIS as a model best.
+    auto timeSome = [&](std::vector<Candidate>& pool) {
+        if (!timer || pool.empty()) return;
+        if (result.timingSeconds > config_.timeFraction * std::max(1.0, elapsed())) return;
+        std::vector<size_t> picks;
+        auto untimed = [&](size_t i) {
+            return !timedKeys.count(pool[i].key) &&
+                   std::find(picks.begin(), picks.end(), i) == picks.end();
+        };
+        for (size_t i = 0; i < pool.size() && picks.size() < 1; ++i)
+            if (untimed(i)) picks.push_back(i);
+        for (size_t i = 0; i < pool.size() && picks.size() < static_cast<size_t>(1 + config_.timeTopK / 2); ++i)
+            if (pool[i].fromTimed && untimed(i)) picks.push_back(i);
+        for (int tries = 0; tries < 4 * config_.timeTopK && picks.size() < static_cast<size_t>(config_.timeTopK);
+             ++tries) {
+            size_t i = static_cast<size_t>(rng.uniformInt(0, static_cast<int>(pool.size()) - 1));
+            if (untimed(i)) picks.push_back(i);
+        }
+        auto t0 = Clock::now();
+        for (size_t i : picks) {
+            const Candidate& c = pool[i];
+            timedKeys.insert(c.key);
+            if (counterexample(*c.program)) continue;
+            auto src = emit(*c.program);
+            if (!src) continue;
+            CompiledTimer::Timing t = timer->time(*src);
+            ++result.timings;
+            if (!t.ok) continue;
+            timed.push_back({c.program->clone(), c.key, t.speedup, c.cost});
+            if (config_.verbose)
+                std::cout << "[superopt] timed " << t.speedup << "x (model cost " << c.cost << ", size "
+                          << c.program->size() << ")\n";
+        }
+        std::sort(timed.begin(), timed.end(), [](const Timed& a, const Timed& b) { return a.speedup > b.speedup; });
+        result.timingSeconds += std::chrono::duration<double>(Clock::now() - t0).count();
+    };
+
     while (elapsed() < config_.wallSeconds) {
         std::vector<const Candidate*> parents;
         for (const auto& c : beam) parents.push_back(&c);
         for (const auto& c : explore) parents.push_back(&c);
+        std::vector<Candidate> timedParents;
+        for (size_t i = 0; i < timed.size() && i < static_cast<size_t>(config_.timedParents); ++i) {
+            if (timed[i].speedup <= 1.0) break;
+            Candidate c;
+            c.program = timed[i].program->clone();
+            c.key = timed[i].key;
+            c.fromTimed = true;
+            timedParents.push_back(std::move(c));
+        }
+        for (const auto& c : timedParents) parents.push_back(&c);
         std::vector<Candidate> fresh, freshExplore;
         for (const Candidate* parent : parents) {
             for (int m = 0; m < config_.mutantsPerParent; ++m) {
                 Candidate c;
                 c.program = mutateForSuperopt(*parent->program, numVars, arity, rng.engine()());
+                c.fromTimed = parent->fromTimed;
                 c.size = c.program->size();
                 if (c.size > maxSize) continue;
                 c.key = printStmt(*c.program);
@@ -395,6 +488,7 @@ SuperoptResult Superoptimizer::run() {
             beam.push_back(std::move(ref));
         }
         if (beam.size() > static_cast<size_t>(config_.beamWidth)) beam.resize(static_cast<size_t>(config_.beamWidth));
+        timeSome(beam);
         for (auto& c : freshExplore) explore.push_back(std::move(c));
         std::sort(explore.begin(), explore.end(), [](const Candidate& a, const Candidate& b) {
             return a.fails != b.fails ? a.fails < b.fails : a.size < b.size;
@@ -425,6 +519,33 @@ SuperoptResult Superoptimizer::run() {
         ++result.counterexamples;
     }
     result.tests = static_cast<int>(tests_.size());
+    result.modelBest = result.best->clone();
+    result.modelBestCost = result.bestCost;
+    if (timer) {
+        // Re-measure the fastest few (3 runs of 21 trials each, median) and
+        // keep one only if it beats the noise threshold; otherwise the answer
+        // is "no measured gain": the reference.
+        result.best = problem_.referenceProgram().clone();
+        result.bestCost = result.referenceCost;
+        result.measuredSpeedup = 1.0;
+        for (size_t k = 0; k < timed.size() && k < 3; ++k) {
+            if (timed[k].speedup <= 1.0 + result.noiseThreshold) break;
+            auto src = emit(*timed[k].program);
+            std::vector<double> r;
+            for (int rep = 0; rep < 3 && src; ++rep) {
+                CompiledTimer::Timing t = timer->time(*src, 21);
+                ++result.timings;
+                if (t.ok) r.push_back(t.speedup);
+            }
+            if (r.size() < 3) continue;
+            std::sort(r.begin(), r.end());
+            if (r[1] > 1.0 + result.noiseThreshold && r[1] > result.measuredSpeedup) {
+                result.best = timed[k].program->clone();
+                result.bestCost = timed[k].cost;
+                result.measuredSpeedup = r[1];
+            }
+        }
+    }
     // verifyGeneralization samples up to n = 80 and magnitude-shifted inputs:
     // budget from the reference's steps there, with a margin for the shift
     // (log 188: the n <= 10 test budget timed out the reference itself).

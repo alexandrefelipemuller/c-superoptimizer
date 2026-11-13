@@ -7,6 +7,7 @@
 #include "language/PrettyPrinter.hpp"
 #include "problems/ReferenceProblem.hpp"
 #include "superopt/CFrontend.hpp"
+#include "superopt/CompiledTimer.hpp"
 #include "superopt/Superoptimizer.hpp"
 #include "test_framework.hpp"
 
@@ -89,4 +90,44 @@ TEST(superopt_never_returns_a_program_worse_than_the_reference) {
     CHECK(r.verified);
     CHECK(r.bestCost <= r.referenceCost);
     CHECK_EQ(r.referenceCost, opt.cost(problem.referenceProgram()));
+}
+
+TEST(compiled_timer_self_control_is_near_one_and_reports_failures) {
+    std::string original = "int f(int x) { int c = 0; while (x != 0) { x &= x - 1; c++; } return c; }\n";
+    CImport imp = importCFunction(original);
+    std::vector<std::vector<int>> workload;
+    for (int i = 0; i < 64; ++i) workload.push_back({i * 2654435761u > 0 ? static_cast<int>(i * 2654435761u) : i});
+    CompiledTimer timer(original, imp.abi, workload, "/tmp/algosearch_timer_test");
+    CompiledTimer::Timing self = timer.time(original);
+    CHECK(self.ok);
+    CHECK(self.speedup > 0.9 && self.speedup < 1.1);
+    // A different program (the count bit by bit) is timed against the same baseline.
+    std::string slow = "int f(int x) { int c = 0; for (int i = 0; i < 32; i++) c += (x >> i) & 1; return c; }\n";
+    CompiledTimer::Timing t = timer.time(slow);
+    CHECK(t.ok);
+    CHECK(t.referenceNs > 0);
+    CHECK(t.speedup != self.speedup);
+    // An uncompilable candidate is reported, not a crash.
+    CompiledTimer::Timing bad = timer.time("int f(int x) { return x +; }\n");
+    CHECK(!bad.ok);
+    CHECK(!bad.error.empty());
+}
+
+TEST(timed_superopt_returns_the_reference_unless_measurably_faster) {
+    std::string src = "int f(int a, int b) { return a > b ? a : b; }\n";
+    ReferenceProblem problem(importCFunction(src), 5, 1, 1'000'000);
+    SuperoptConfig cfg;
+    cfg.wallSeconds = 3.0;
+    cfg.timeTopK = 2;
+    cfg.originalSource = src;
+    cfg.workDir = "/tmp/algosearch_timed_superopt_test";
+    Superoptimizer opt(problem, cfg);
+    SuperoptResult r = opt.run();
+    CHECK(r.verified);
+    CHECK(r.timings >= 4);  // self-control x3 + emitted reference
+    CHECK(r.selfControl > 0.8 && r.selfControl < 1.25);
+    CHECK(r.noiseThreshold >= 0.03);
+    // Either no gain (the reference is returned) or a gain above the noise.
+    bool isReference = printStmt(*r.best) == printStmt(problem.referenceProgram());
+    CHECK(isReference ? r.measuredSpeedup == 1.0 : r.measuredSpeedup > 1.0 + r.noiseThreshold);
 }

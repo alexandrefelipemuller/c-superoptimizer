@@ -29,6 +29,13 @@ struct SuperoptConfig {
     // An exploration candidate may fail at most this fraction of the tests.
     double maxFailFraction = 0.1;
     bool verbose = false;
+    // Phase 3b: compile and time candidates against the original inside the
+    // loop (CompiledTimer). 0 = off: the model alone decides (phase 3).
+    int timeTopK = 0;
+    std::string originalSource;  // the user's C file, the timing baseline
+    std::string workDir = "/tmp/algosearch_superopt";
+    int timedParents = 6;         // fastest timed programs used as parents
+    double timeFraction = 0.5;    // at most this share of the wall clock goes to timing
 };
 
 struct SuperoptResult {
@@ -44,6 +51,15 @@ struct SuperoptResult {
     std::string verifyReason;
     // (seconds, cost) each time the best improved.
     std::vector<std::pair<double, long long>> trajectory;
+    // Phase 3b (timeTopK > 0).
+    int timings = 0;
+    double noiseThreshold = 0;     // a speedup must exceed 1 + this to count
+    double selfControl = 1.0;      // original against itself, median of 3
+    double emittedReference = 1.0; // the imported reference, emitted, against the original
+    double measuredSpeedup = 1.0;  // of `best`, re-measured; 1.0 when best is the reference
+    double timingSeconds = 0;
+    Program modelBest;             // what the model alone would have returned
+    long long modelBestCost = 0;
 };
 
 class Superoptimizer {

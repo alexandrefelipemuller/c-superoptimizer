@@ -16,7 +16,8 @@ Interface gaps (planned 2026-11-13), and their status:
 | 1 | C -> Mini-C front end, Mini-C -> C emitter, round-trip check | done (log 186) |
 | 2 | `ReferenceProblem`: the original function is the oracle | done (log 187) |
 | 3 | cost model; search from the reference, objective cost given correctness; compiled speedup measurement | done (log 188-188b): one real gain; the uncalibrated model does not predict compiled time |
-| 3b | cost from compiled code (time the top candidates in the loop, or fit the weights on measured times) | next |
+| 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
+| 3c | reach: algorithmic moves (loop unrolling, strength reduction, branch-free templates), larger functions | next |
 | 4 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | |
 | 5 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -124,10 +125,38 @@ from the imported function and searches for an equivalent, cheaper one.
   result also passes `verifyGeneralization`. The process exits with 3 if it
   does not.
 
-Results so far (log 188b): all 45 results compiled-equivalent; one real gain,
-`is_pow2_loop` at 1.15-1.34x (the search removes two zero bits per iteration);
-the model's rank of candidates barely matches compiled time (Spearman 0.12),
-and its favourite for `count_trailing_zeros` is 0.55-0.60x as fast.
+Results so far:
+- With the model alone (log 188b): all 45 results were compiled-equivalent,
+  with one real gain: `is_pow2_loop` at 1.15-1.34x (the search removes two
+  zero bits per iteration). But the model's ranking barely matched compiled
+  time (Spearman 0.12), and its favourite for `count_trailing_zeros` ran at
+  0.55-0.60x.
+- With `--time-top 4` (log 189, the recommended mode): 45/45 equivalent and
+  no regression (lowest 0.963). `is_pow2_loop` gains 1.17-1.20x, and `sign`
+  gains 1.64x with a rewrite the model rates as equal cost
+  (`(x > -1) - (x <= 0)`, a gcc code-generation effect). When nothing beats
+  the noise, the reference is returned (32 of 45 runs).
+
+### Compiled timing in the loop (phase 3b)
+
+`--time-top K` (`src/superopt/CompiledTimer.cpp`) compiles each timed
+candidate together with the original into one timing translation unit and
+times them interleaved in one process, so both can be inlined into their
+timing loops. A separate-executable harness carried a process-level bias of
+up to 1.5x (log 188b).
+
+- At the start, the original is timed against itself 3 times. The noise
+  threshold is max(3%, 2x the largest deviation from 1).
+- In each generation, up to K untimed correct candidates are timed: the
+  model's best, mutants of measured-fast parents, then random ones. Each first
+  passes the counterexample search. Timing may take at most half of the wall
+  clock so far.
+- The fastest timed programs become parents, so measured time steers the
+  search while the model still ranks the beam.
+- At the end, the three fastest are re-measured (3 x 21 trials). The result
+  is the fastest one above the noise threshold, or the reference itself
+  ("no measured gain"), never a program the model likes and the machine does
+  not.
 
 `scripts/c_speedup.py ORIGINAL.c FOUND.c` measures what counts: both compiled
 with gcc -O2 -fwrapv in separate translation units, called through a volatile

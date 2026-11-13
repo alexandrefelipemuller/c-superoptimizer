@@ -1,6 +1,7 @@
 #include "superopt/CImportTool.hpp"
 
 #include <fstream>
+#include <unistd.h>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -148,6 +149,8 @@ int runSuperoptTool(int argc, char** argv) {
         else if (a == "--num-vars") numVars = std::stoi(next());
         else if (a == "--out") outPath = next();
         else if (a == "--verbose") cfg.verbose = true;
+        else if (a == "--time-top") cfg.timeTopK = std::stoi(next());
+        else if (a == "--work-dir") cfg.workDir = next();
         else if (file.empty() && !a.empty() && a[0] != '-') file = a;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
@@ -157,7 +160,7 @@ int runSuperoptTool(int argc, char** argv) {
     }
     if (file.empty()) {
         std::cerr << "usage: algosearch superopt FILE.c [--func NAME] [--seconds 30] [--beam 40] [--mutants 12] "
-                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose]\n";
+                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR]\n";
         return 1;
     }
     try {
@@ -168,6 +171,8 @@ int runSuperoptTool(int argc, char** argv) {
         }
         CImport imp = importCFunction(source, func);
         int vars = numVars > 0 ? numVars : imp.abi.numVars + 2;
+        cfg.originalSource = source;
+        if (cfg.workDir == SuperoptConfig().workDir) cfg.workDir += "_" + std::to_string(getpid());
         // Inputs on which the reference needs more than 1M steps are outside
         // the domain the result is checked on (docs/superopt.md).
         ReferenceProblem problem(std::move(imp), vars, cfg.seed, 1'000'000);
@@ -179,6 +184,12 @@ int runSuperoptTool(int argc, char** argv) {
                   << "\nevaluated " << r.evaluated << "\ncorrect " << r.correct << "\ntests " << r.tests
                   << "\ncounterexamples " << r.counterexamples << "\nverified " << (r.verified ? "yes" : "NO")
                   << (r.verified ? "" : " (" + r.verifyReason + ")") << "\n";
+        if (cfg.timeTopK > 0) {
+            std::cout << "timings " << r.timings << "\ntiming_seconds " << r.timingSeconds << "\nself_control "
+                      << r.selfControl << "\nnoise_threshold " << r.noiseThreshold << "\nemitted_reference "
+                      << r.emittedReference << "\nmeasured_speedup " << r.measuredSpeedup << "\nmodel_best_cost "
+                      << r.modelBestCost << "\n";
+        }
         std::cout << "trajectory";
         for (const auto& [t, c] : r.trajectory) std::cout << " " << t << ":" << c;
         std::cout << "\n--- Mini-C\n" << printStmt(*r.best);
