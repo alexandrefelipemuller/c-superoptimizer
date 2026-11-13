@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "ast/Expr.hpp"
+#include "interpreter/CostModel.hpp"
 
 namespace algosearch {
 
@@ -42,6 +43,9 @@ struct Environment {
     // Interpreter::setWrapArithmetic: a multiply that overflows int wraps
     // (two's complement) instead of being a runtime error.
     bool wrapArithmetic = false;
+    // Interpreter::setCostModel: null (the default) skips cost accounting.
+    const CostModel* costModel = nullptr;
+    long long cost = 0;
     // Interpreter::setConditionTrace; null when unused.
     const Stmt* traceSite = nullptr;
     const std::function<void(const std::vector<int>&, const std::vector<int>&)>* traceFn = nullptr;
@@ -59,6 +63,7 @@ inline void tick(Environment& env) {
 int evalExpr(const Expr& e, Environment& env) {
     tick(env);
     if (aborted(env)) return 0;
+    if (env.costModel) env.cost += env.costModel->weight(e);
     switch (e.kind) {
         case ExprKind::IntConst:
             return e.intValue;
@@ -178,6 +183,7 @@ void execBlock(const std::vector<std::unique_ptr<Stmt>>& stmts, Environment& env
 void execStmt(const Stmt& s, Environment& env) {
     tick(env);
     if (aborted(env)) return;
+    if (env.costModel) env.cost += env.costModel->weight(s);
     // Section 65: assignment sites are traced too (If/While trace at their
     // condition, below).
     if (&s == env.traceSite && s.kind != StmtKind::If && s.kind != StmtKind::While) (*env.traceFn)(env.vars, env.arr);
@@ -260,6 +266,7 @@ void execStmt(const Stmt& s, Environment& env) {
             for (;;) {
                 if (&s == env.traceSite) (*env.traceFn)(env.vars, env.arr);
                 int cond = evalExpr(*s.cond, env);
+                if (env.costModel) env.cost += env.costModel->loopCheck;
                 if (aborted(env) || cond == 0) return;
                 tick(env);
                 if (aborted(env)) return;
@@ -312,6 +319,8 @@ void execBlock(const std::vector<std::unique_ptr<Stmt>>& stmts, Environment& env
 
 }  // namespace
 
+thread_local long long Interpreter::lastCost_ = 0;
+
 RunStatus Interpreter::run(const Stmt& program, const std::vector<int>& input, int numVars, std::vector<int>& output,
                             long* stepsOut, std::vector<int>* varsOut) const {
     // One environment per thread, reused across the millions of runs a search
@@ -330,6 +339,8 @@ RunStatus Interpreter::run(const Stmt& program, const std::vector<int>& input, i
     env.recursionDepth = 0;
     env.maxRecursionDepth = maxRecursionDepth_;
     env.wrapArithmetic = wrapArithmetic_;
+    env.costModel = costModel_;
+    env.cost = 0;
     env.traceSite = traceFn_ ? traceSite_ : nullptr;
     env.traceFn = &traceFn_;
     if (seedRecursionBounds_ && numVars > 2) {
@@ -340,6 +351,7 @@ RunStatus Interpreter::run(const Stmt& program, const std::vector<int>& input, i
     execStmt(program, env);
 
     if (stepsOut) *stepsOut = env.steps;
+    lastCost_ = env.cost;
 
     switch (env.flow) {
         case Flow::Timeout:

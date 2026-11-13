@@ -5,6 +5,7 @@
 
 #include "ast/Stmt.hpp"
 #include "core/Types.hpp"
+#include "interpreter/CostModel.hpp"
 
 namespace algosearch {
 
@@ -65,7 +66,15 @@ public:
     // default: every search reproduces prior behavior exactly.
     void setWrapArithmetic(bool on) { wrapArithmetic_ = on; }
 
+    // Weighted dynamic cost (interpreter/CostModel.hpp) of each run, read
+    // back with lastCost() on the same thread right after run(). Null (the
+    // default) turns accounting off; nothing else about a run changes.
+    void setCostModel(const CostModel* model) { costModel_ = model; }
+    static long long lastCost() { return lastCost_; }
+
 private:
+    static thread_local long long lastCost_;
+    const CostModel* costModel_ = nullptr;
     bool wrapArithmetic_ = false;
     const Stmt* traceSite_ = nullptr;
     std::function<void(const std::vector<int>&, const std::vector<int>&)> traceFn_;

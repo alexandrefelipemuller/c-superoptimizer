@@ -14,9 +14,6 @@ namespace algosearch {
 
 namespace {
 
-// Reference runs get a generous budget of their own: the search's step limit
-// bounds the candidates, not the specification.
-constexpr long referenceStepLimit = 10'000'000;
 constexpr size_t cacheCap = 2'000'000;
 constexpr int instancesPerLevel = 40;
 
@@ -35,7 +32,9 @@ size_t ReferenceProblem::VecHash::operator()(const std::vector<int>& v) const {
     return static_cast<size_t>(h);
 }
 
-ReferenceProblem::ReferenceProblem(CImport reference, int numVars, uint64_t seed)
+// Reference runs get a budget of their own (10M by default): the search's
+// step limit bounds the candidates, not the specification.
+ReferenceProblem::ReferenceProblem(CImport reference, int numVars, uint64_t seed, long referenceStepLimit)
     : reference_(std::move(reference.program)),
       abi_(std::move(reference.abi)),
       numVars_(numVars),
@@ -60,7 +59,7 @@ int ReferenceProblem::magnitude(int level) {
     return static_cast<int>((1LL << (std::max(level, 0) + 1)) - 1);
 }
 
-std::optional<std::vector<int>> ReferenceProblem::expected(const std::vector<int>& input) const {
+ReferenceProblem::Run ReferenceProblem::reference(const std::vector<int>& input) const {
     {
         std::shared_lock lock(cacheMutex_);
         auto it = cache_.find(input);
@@ -70,13 +69,22 @@ std::optional<std::vector<int>> ReferenceProblem::expected(const std::vector<int
     // called while a candidate run is in flight on the same thread (callers
     // classify a run only after it returned), so sharing it is safe.
     std::vector<int> out;
-    std::optional<std::vector<int>> result;
-    if (referenceInterp_.run(*reference_, input, abi_.numVars, out) == RunStatus::COMPLETED)
-        result = abiResult(abi_, out);
+    Run r;
+    long steps = 0;
+    if (referenceInterp_.run(*reference_, input, abi_.numVars, out, &steps) == RunStatus::COMPLETED) {
+        r.result = abiResult(abi_, out);
+        r.steps = steps;
+    }
     std::unique_lock lock(cacheMutex_);
-    if (cache_.size() < cacheCap) cache_.emplace(input, result);
-    return result;
+    if (cache_.size() < cacheCap) cache_.emplace(input, r);
+    return r;
 }
+
+std::optional<std::vector<int>> ReferenceProblem::expected(const std::vector<int>& input) const {
+    return reference(input).result;
+}
+
+long ReferenceProblem::referenceSteps(const std::vector<int>& input) const { return reference(input).steps; }
 
 std::vector<Instance> ReferenceProblem::toInstances(const std::vector<std::vector<int>>& inputs) const {
     std::vector<Instance> out;
@@ -107,8 +115,11 @@ std::vector<Instance> ReferenceProblem::generateInstances(int level) const {
     std::vector<std::vector<int>> inputs;
     if (abi_.kind == CFunctionAbi::Kind::Array) {
         int n = level;
+        // n = 0 is a valid C call (log 188: a candidate looping on `v1 - v0`
+        // instead of `v1 < v0` read past an empty array); level 1 tests it.
+        if (n == 1) inputs.push_back({});
         if (n <= 4) {
-            inputs = allArraysOver(n, -1, 2);
+            for (auto& a : allArraysOver(n, -1, 2)) inputs.push_back(a);
         } else {
             inputs = randomArraysOver(n, -1, 2, instancesPerLevel / 2, seed_ + static_cast<uint64_t>(n));
         }

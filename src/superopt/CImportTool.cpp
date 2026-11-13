@@ -9,7 +9,9 @@
 #include "interpreter/Interpreter.hpp"
 #include "language/Parser.hpp"
 #include "language/PrettyPrinter.hpp"
+#include "problems/ReferenceProblem.hpp"
 #include "superopt/CFrontend.hpp"
+#include "superopt/Superoptimizer.hpp"
 
 namespace algosearch {
 
@@ -118,6 +120,72 @@ int runCImportTool(int argc, char** argv) {
                   << " size=" << imp.program->size() << "\n";
         std::cout << printStmt(*imp.program);
         return 0;
+    } catch (const CImportError& e) {
+        std::cerr << file << ": " << e.what() << "\n";
+        return 2;
+    }
+}
+
+int runSuperoptTool(int argc, char** argv) {
+    std::string file, func, outPath;
+    SuperoptConfig cfg;
+    int numVars = -1;
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        auto next = [&]() -> std::string {
+            if (i + 1 >= argc) {
+                std::cerr << "Missing value for " << a << "\n";
+                std::exit(1);
+            }
+            return argv[++i];
+        };
+        if (a == "--func") func = next();
+        else if (a == "--seconds") cfg.wallSeconds = std::stod(next());
+        else if (a == "--beam") cfg.beamWidth = cfg.exploreWidth = std::stoi(next());
+        else if (a == "--mutants") cfg.mutantsPerParent = std::stoi(next());
+        else if (a == "--seed") cfg.seed = std::stoull(next());
+        else if (a == "--max-n") cfg.arrayMaxN = std::stoi(next());
+        else if (a == "--num-vars") numVars = std::stoi(next());
+        else if (a == "--out") outPath = next();
+        else if (a == "--verbose") cfg.verbose = true;
+        else if (file.empty() && !a.empty() && a[0] != '-') file = a;
+        else {
+            std::cerr << "Unknown argument: " << a << "\n";
+            file.clear();
+            break;
+        }
+    }
+    if (file.empty()) {
+        std::cerr << "usage: algosearch superopt FILE.c [--func NAME] [--seconds 30] [--beam 40] [--mutants 12] "
+                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose]\n";
+        return 1;
+    }
+    try {
+        std::string source;
+        if (!readFile(file, source)) {
+            std::cerr << "cannot read " << file << "\n";
+            return 1;
+        }
+        CImport imp = importCFunction(source, func);
+        int vars = numVars > 0 ? numVars : imp.abi.numVars + 2;
+        // Inputs on which the reference needs more than 1M steps are outside
+        // the domain the result is checked on (docs/superopt.md).
+        ReferenceProblem problem(std::move(imp), vars, cfg.seed, 1'000'000);
+        Superoptimizer opt(problem, cfg);
+        SuperoptResult r = opt.run();
+        double ratio = r.bestCost > 0 ? static_cast<double>(r.referenceCost) / static_cast<double>(r.bestCost) : 0.0;
+        std::cout << "reference_cost " << r.referenceCost << "\nbest_cost " << r.bestCost << "\nmodel_speedup " << ratio
+                  << "\nreference_size " << problem.referenceProgram().size() << "\nbest_size " << r.best->size()
+                  << "\nevaluated " << r.evaluated << "\ncorrect " << r.correct << "\ntests " << r.tests
+                  << "\ncounterexamples " << r.counterexamples << "\nverified " << (r.verified ? "yes" : "NO")
+                  << (r.verified ? "" : " (" + r.verifyReason + ")") << "\n";
+        std::cout << "trajectory";
+        for (const auto& [t, c] : r.trajectory) std::cout << " " << t << ":" << c;
+        std::cout << "\n--- Mini-C\n" << printStmt(*r.best);
+        std::string c = emitCFunction(*r.best, problem.abi());
+        std::cout << "--- C\n" << c;
+        if (!outPath.empty()) std::ofstream(outPath) << c;
+        return r.verified ? 0 : 3;
     } catch (const CImportError& e) {
         std::cerr << file << ": " << e.what() << "\n";
         return 2;

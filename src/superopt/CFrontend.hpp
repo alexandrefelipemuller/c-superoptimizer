@@ -54,6 +54,11 @@ CImport importCFunction(const std::string& source, const std::string& funcName =
 // runtime error (C has no bounds checks). Throws CImportError for Call.
 std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi);
 
+// Whether emitCFunction must copy the caller's array for this program (an
+// int array function that writes the array other than for its result): the
+// copy is O(n) work the Mini-C cost does not see.
+bool emittedCopiesArray(const Stmt& program, const CFunctionAbi& abi);
+
 // The Mini-C input array of a call is the argument list itself (Scalars) or
 // the array (Array). The call's result, read back from the final array: one
 // value, or the whole array for a void array function.

@@ -15,7 +15,8 @@ Interface gaps (planned 2026-11-13), and their status:
 | 0 | interpreter semantics match C (`gcc -fwrapv`, 32-bit `int`) | done (log 186) |
 | 1 | C -> Mini-C front end, Mini-C -> C emitter, round-trip check | done (log 186) |
 | 2 | `ReferenceProblem`: the original function is the oracle | done (log 187) |
-| 3 | weighted cost model calibrated on compiled code; search seeded with the reference, objective cost given correctness | next |
+| 3 | cost model; search from the reference, objective cost given correctness; compiled speedup measurement | done (log 188-188b): one real gain; the uncalibrated model does not predict compiled time |
+| 3b | cost from compiled code (time the top candidates in the loop, or fit the weights on measured times) | next |
 | 4 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | |
 | 5 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -95,6 +96,51 @@ result of any input is what the reference computes in wraparound mode.
 - After the search, the confirmed (SUCCESS) solution that reached the highest
   level, the smallest among those, is printed as C and written with `--c-out`.
 
+## Superoptimizer (phase 3)
+
+`algosearch superopt FILE.c [--seconds 30] [--seed 1] [--out FOUND.c]` starts
+from the imported function and searches for an equivalent, cheaper one.
+
+- Cost: `interpreter/CostModel.hpp`, a weighted dynamic count of the nodes
+  executed (`Interpreter::setCostModel`; off by default and byte-identical):
+  simple ALU ops, loads and stores 1, multiply 3, divide/modulo 20, a branch 1
+  (every `if`, every loop-condition check), variables free. For scalar
+  functions, `arr[constant]` is free (gcc keeps the argument array in
+  registers). The weights are uncalibrated guesses.
+- Workload for the cost: 64 scalar inputs (70% over all of int) or 24
+  arrays of 16-64 values, all inside the reference's domain.
+- Correct means passing every test: all levels of the ReferenceProblem plus
+  adversarial instances. Each run gets a step budget of 4x the reference's
+  steps on that input plus 200, so a mutant stuck in a loop is cheap to reject.
+  The reference's domain is the inputs it finishes within 1M steps.
+- Moves: delete a statement; replace, hoist or copy an expression; change an
+  operator; tweak a constant; replace an `if` or a loop by its body; insert an
+  assignment; swap adjacent statements. One to four per mutant.
+- Beams: correct programs by (cost, size), plus an exploration beam of
+  candidates failing at most 10% of the tests (STOKE-like, so the search can
+  cross incorrect intermediates).
+- CEGIS: each new best is checked on the exhaustive inputs plus 2000 random
+  ones; a counterexample becomes a test and the beam is re-filtered. The
+  result also passes `verifyGeneralization`. The process exits with 3 if it
+  does not.
+
+Results so far (log 188b): all 45 results compiled-equivalent; one real gain,
+`is_pow2_loop` at 1.15-1.34x (the search removes two zero bits per iteration);
+the model's rank of candidates barely matches compiled time (Spearman 0.12),
+and its favourite for `count_trailing_zeros` is 0.55-0.60x as fast.
+
+`scripts/c_speedup.py ORIGINAL.c FOUND.c` measures what counts: both compiled
+with gcc -O2 -fwrapv in separate translation units, called through a volatile
+function pointer, with the empty-call overhead subtracted. It takes the
+median of 15 interleaved trials, measured with both link orders (geometric
+mean). Functions and loops are aligned to 64 bytes, because code placement
+alone moved one loop by 25%. Self-controls (a function against itself) stay
+within 0.98-1.01. Below about 2 ns per call, timing through a call is not
+readable. `--inline` instead compiles each function into the timing loop's own
+translation unit, which is how a caller would use it. Even then, a ~1 ns array
+function measured up to 1.5x against itself, so every claim keeps a
+self-control of the same function.
+
 ## Tools
 
     ./algosearch c-import FILE.c [--func NAME]      # Mini-C translation
@@ -103,6 +149,8 @@ result of any input is what the reference computes in wraparound mode.
     ./algosearch c-import FILE.c --program P --emit # C for another Mini-C program under FILE's ABI
     scripts/c_roundtrip.py tests/c_samples/*.c      # interpreter = original C = regenerated C
     scripts/c_roundtrip.py FILE.c --candidate X.c   # a search result against the original
+    ./algosearch superopt FILE.c --seconds 60 --out X.c  # phase 3
+    scripts/c_speedup.py FILE.c X.c                  # compiled speedup
 
     ./algosearch --problem c:tests/c_samples/array_sum.c --max-n 30 --beam-width 500 \
         --candidates 1500 --max-program-size 150 --seed 2 --c-out found.c

@@ -1033,6 +1033,11 @@ std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
     return out.str();
 }
 
+bool emittedCopiesArray(const Stmt& program, const CFunctionAbi& abi) {
+    return abi.kind == CFunctionAbi::Kind::Array && abi.returnsValue &&
+           writesArrayBeyondResult(program.body, /*topLevel=*/true);
+}
+
 std::vector<int> abiResult(const CFunctionAbi& abi, const std::vector<int>& finalArray) {
     if (abi.returnsValue) {
         if (finalArray.empty()) return {};

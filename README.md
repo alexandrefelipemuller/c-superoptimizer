@@ -46,7 +46,7 @@ pointers to the raw data backing each claim.
 
 ```sh
 make            # builds ./algosearch
-make test       # builds and runs ./algosearch_tests (291 unit/integration tests)
+make test       # builds and runs ./algosearch_tests (297 unit/integration tests)
 ```
 
 ## Running a search
@@ -76,9 +76,11 @@ scripts/c_roundtrip.py tests/c_samples/array_sum.c --candidate found.c
 
 A subset of C (`int` scalars, one `int *a, int n` array) is translated into
 Mini-C and back, and `--problem c:FILE.c` searches with that function as the
-oracle and emits the solution as C. This is the first step towards using the
-search as a source-level superoptimizer; no cost objective yet. Semantics, ABI,
-supported subset and the plan are in `docs/superopt.md`.
+oracle and emits the solution as C. `algosearch superopt FILE.c` starts from
+the function itself and searches for a cheaper equivalent; `scripts/c_speedup.py`
+measures the compiled speedup. So far it finds one real gain on the 15 samples
+(`is_pow2_loop`, 1.15-1.34x) and its cost model is not yet calibrated.
+Semantics, ABI, supported subset, results and the plan are in `docs/superopt.md`.
 
 ## Results
 

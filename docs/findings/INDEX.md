@@ -320,3 +320,7 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 186. C superoptimizer prototype phases 0-1: C semantics (wrap), C import/export, round trip 15/15 | 11_sections_121-125.md | 2090 |
 | 187. (registered) Phase 2: the C function as oracle (ReferenceProblem); unseeded rediscovery of 15 samples | 11_sections_121-125.md | 2097 |
 | 187. (results) 13/45 rediscovered, all compiled-equivalent; scalar bit functions stall at level 1 within the size budget | 11_sections_121-125.md | 2105 |
+| 188. (registered) Phase 3: superoptimizing from the reference with a weighted cost model; compiled speedup measurement | 11_sections_121-125.md | 2112 |
+| 188. (results, first run) n = 0 hole gave one wrong result; verification, emitter-cost and timing-resolution defects fixed; is_pow2 1.23-1.31x | 11_sections_121-125.md | 2121 |
+| 188b. (registered) Rerun after the fixes, seeds 4-6, inline timing for scalar functions | 11_sections_121-125.md | 2131 |
+| 188b. (results) 45/45 equivalent; one gain (is_pow2 1.15-1.34x); model vs measured Spearman 0.12 | 11_sections_121-125.md | 2135 |

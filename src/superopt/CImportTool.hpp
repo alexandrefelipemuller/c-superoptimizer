@@ -11,4 +11,10 @@ namespace algosearch {
 // the translation by another Mini-C program (a search result) under FILE's ABI.
 int runCImportTool(int argc, char** argv);
 
+// `algosearch superopt FILE.c [--func NAME] [--seconds S] [--out FOUND.c] ...`:
+// phase 3 (docs/superopt.md). Starts from the imported function, searches for
+// a cheaper equivalent under the cost model, prints both costs and the result
+// (Mini-C and C). Exit 3 if the result failed the final verification.
+int runSuperoptTool(int argc, char** argv);
+
 }  // namespace algosearch

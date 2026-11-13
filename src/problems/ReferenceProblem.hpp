@@ -24,13 +24,16 @@ namespace algosearch {
 // behaviour in C, so it is outside the function's domain -- it never
 // becomes an instance, and isSolution accepts any output on it.
 //
-// Levels. Array ABI: level n = array length, as in the array problems.
+// Levels. Array ABI: level n = array length, as in the array problems
+// (level 1 also holds the empty array, when it is in the domain).
 // Scalar ABI: level L draws every argument from [-M, M] with
 // M = 2^(L+1) - 1 (L = 1: [-3, 3]; L = 7: [-255, 255]; L >= 30: all of
 // int, INT_MIN included), exhaustive while the grid is small.
 class ReferenceProblem : public Problem {
 public:
-    ReferenceProblem(CImport reference, int numVars, uint64_t seed);
+    // `referenceStepLimit`: inputs on which the reference runs longer are
+    // outside the domain (default 10M interpreter steps).
+    ReferenceProblem(CImport reference, int numVars, uint64_t seed, long referenceStepLimit = 10'000'000);
 
     // Reads and imports FILE (throws CImportError on unsupported C, and
     // std::runtime_error when the file cannot be read).
@@ -53,6 +56,9 @@ public:
 
     // The reference's result on `input`, or nullopt outside its domain.
     std::optional<std::vector<int>> expected(const std::vector<int>& input) const;
+    // Interpreter steps the reference takes on `input`, or -1 outside its
+    // domain.
+    long referenceSteps(const std::vector<int>& input) const;
 
     static int magnitude(int level);
 
@@ -70,7 +76,12 @@ private:
         size_t operator()(const std::vector<int>& v) const;
     };
     mutable std::shared_mutex cacheMutex_;
-    mutable std::unordered_map<std::vector<int>, std::optional<std::vector<int>>, VecHash> cache_;
+    struct Run {
+        std::optional<std::vector<int>> result;
+        long steps = -1;
+    };
+    Run reference(const std::vector<int>& input) const;  // cached
+    mutable std::unordered_map<std::vector<int>, Run, VecHash> cache_;
 };
 
 }  // namespace algosearch

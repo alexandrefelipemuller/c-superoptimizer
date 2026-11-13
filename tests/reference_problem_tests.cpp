@@ -82,12 +82,16 @@ TEST(reference_problem_runs_candidates_with_wraparound_multiply) {
 TEST(reference_problem_array_levels_are_lengths_and_void_results_are_arrays) {
     ReferenceProblem p = fromSource(
         "void f(int *a, int n) { int i = 0, j = n - 1; while (i < j) { int t = a[i]; a[i] = a[j]; a[j] = t; i++; j--; } }");
+    bool sawEmpty = false;
     for (int n : {1, 3, 6})
         for (const Instance& i : p.generateInstances(n)) {
-            CHECK_EQ(static_cast<int>(i.input.size()), n);
+            sawEmpty = sawEmpty || i.input.empty();
+            if (i.input.empty()) CHECK_EQ(n, 1);  // level 1 also tests n = 0
+            else CHECK_EQ(static_cast<int>(i.input.size()), n);
             std::vector<int> rev(i.input.rbegin(), i.input.rend());
             CHECK(i.expectedOutput == rev);
         }
+    CHECK(sawEmpty);
     CHECK(solvesLevels(p, p.referenceProgram(), {1, 2, 5, 9}));
     // Half the positions right earns partial credit, a correct array full credit.
     CHECK(p.partialScore({1, 2, 3, 4}, {4, 3, 0, 0}) > 0.4);
@@ -102,4 +106,19 @@ TEST(reference_problem_exhaustive_inputs_cover_small_domains) {
     ReferenceProblem array = fromSource("int f(int *a, int n) { int s = 0; for (int i = 0; i < n; i++) s += a[i]; return s; }");
     CHECK_EQ(static_cast<int>(array.exhaustiveInputs(3).size()), 125);
     CHECK(array.exhaustiveInputs(6).empty());
+}
+
+TEST(reference_problem_level_one_catches_a_loop_that_reads_an_empty_array) {
+    // Log 188: superopt changed `v1 < v0` into `v1 - v0`; equal on n >= 1,
+    // reads arr[1] when n = 0 (a segfault in the compiled C).
+    ReferenceProblem p = fromSource(
+        "void isort(int *a, int n) { for (int i = 1; i < n; i++) { int k = a[i]; int j = i - 1;"
+        " while (j >= 0 && a[j] > k) { a[j + 1] = a[j]; j--; } a[j + 1] = k; } }");
+    Program bad = parseProgram(
+        "v1 = 1;\nwhile ((v1 - v0)) {\n  v3 = (v1 - 1);\n  v2 = arr[v1];\n  v1 = (v1 + 1);\n  while ((v3 + 1)) {\n"
+        "    v4 = (arr[v3] > v2);\n    if ((v4 == 0)) {\n      break;\n    }\n    arr[(v3 + 1)] = arr[v3];\n"
+        "    v3 = (v3 - v4);\n  }\n  arr[(v3 + 1)] = v2;\n}\n");
+    CHECK(bad != nullptr);
+    CHECK(solvesLevels(p, *bad, {2, 3, 5, 9}));  // right whenever n >= 2
+    CHECK(!solvesLevels(p, *bad, {1}));          // the empty array exposes it
 }

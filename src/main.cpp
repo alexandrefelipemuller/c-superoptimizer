@@ -1348,6 +1348,7 @@ void emitReferenceSolution(const ReferenceProblem& ref, const std::vector<Soluti
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "c-import") == 0) return runCImportTool(argc - 1, argv + 1);
+    if (argc > 1 && std::strcmp(argv[1], "superopt") == 0) return runSuperoptTool(argc - 1, argv + 1);
     CliArgs args;
     if (!parseArgs(argc, argv, args)) {
         printUsage();
