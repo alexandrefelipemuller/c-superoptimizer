@@ -94,6 +94,12 @@ public:
         return isSolution(input, output) ? 1.0 : 0.0;
     }
 
+    // Whether candidate programs run with C's wraparound semantics for an
+    // overflowing multiply (Interpreter::setWrapArithmetic) -- the model of
+    // a problem whose specification is C code (ReferenceProblem). Default
+    // false: an overflowing multiply stays a runtime error, as before.
+    virtual bool wrapArithmetic() const { return false; }
+
     // Number of scalar integer variables a generated program may use.
     virtual int numVars() const = 0;
 

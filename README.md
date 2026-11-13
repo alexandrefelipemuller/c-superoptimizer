@@ -46,7 +46,7 @@ pointers to the raw data backing each claim.
 
 ```sh
 make            # builds ./algosearch
-make test       # builds and runs ./algosearch_tests (285 unit/integration tests)
+make test       # builds and runs ./algosearch_tests (291 unit/integration tests)
 ```
 
 ## Running a search
@@ -69,10 +69,16 @@ are either "confirmed default" or "opt-in, mixed evidence" per
 scripts/c_roundtrip.py tests/c_samples/*.c                     # interpreter = original C = regenerated C
 ```
 
+```sh
+./algosearch --problem c:tests/c_samples/array_sum.c --max-n 30 --seed 2 --c-out found.c
+scripts/c_roundtrip.py tests/c_samples/array_sum.c --candidate found.c
+```
+
 A subset of C (`int` scalars, one `int *a, int n` array) is translated into
-Mini-C and back, as the first step towards using the search as a source-level
-superoptimizer. Semantics, ABI, supported subset and the plan are in
-`docs/superopt.md`; it is not connected to the search yet.
+Mini-C and back, and `--problem c:FILE.c` searches with that function as the
+oracle and emits the solution as C. This is the first step towards using the
+search as a source-level superoptimizer; no cost objective yet. Semantics, ABI,
+supported subset and the plan are in `docs/superopt.md`.
 
 ## Results
 

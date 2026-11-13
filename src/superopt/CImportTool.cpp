@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "interpreter/Interpreter.hpp"
+#include "language/Parser.hpp"
 #include "language/PrettyPrinter.hpp"
 #include "superopt/CFrontend.hpp"
 
@@ -28,7 +29,7 @@ const char* kindName(CFunctionAbi::Kind k) { return k == CFunctionAbi::Kind::Arr
 }  // namespace
 
 int runCImportTool(int argc, char** argv) {
-    std::string file, func, evalPath;
+    std::string file, func, evalPath, programPath;
     bool emit = false;
     long stepLimit = 10'000'000;
     for (int i = 1; i < argc; ++i) {
@@ -43,6 +44,7 @@ int runCImportTool(int argc, char** argv) {
         if (a == "--func") func = next();
         else if (a == "--emit") emit = true;
         else if (a == "--eval") evalPath = next();
+        else if (a == "--program") programPath = next();
         else if (a == "--step-limit") stepLimit = std::stol(next());
         else if (file.empty() && !a.empty() && a[0] != '-') file = a;
         else {
@@ -52,7 +54,7 @@ int runCImportTool(int argc, char** argv) {
         }
     }
     if (file.empty()) {
-        std::cerr << "usage: algosearch c-import FILE.c [--func NAME] [--emit] [--eval INPUTS] [--step-limit N]\n";
+        std::cerr << "usage: algosearch c-import FILE.c [--func NAME] [--program MINIC] [--emit] [--eval INPUTS] [--step-limit N]\n";
         return 1;
     }
     std::string source;
@@ -62,6 +64,20 @@ int runCImportTool(int argc, char** argv) {
     }
     try {
         CImport imp = importCFunction(source, func);
+        if (!programPath.empty()) {
+            // Another Mini-C program (e.g. a search result) under FILE's ABI.
+            std::string text;
+            if (!readFile(programPath, text)) {
+                std::cerr << "cannot read " << programPath << "\n";
+                return 1;
+            }
+            Program p = parseProgram(text);
+            if (!p) {
+                std::cerr << programPath << ": not a Mini-C program\n";
+                return 1;
+            }
+            imp.program = std::move(p);
+        }
         if (emit) {
             std::cout << emitCFunction(*imp.program, imp.abi);
             return 0;

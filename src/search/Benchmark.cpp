@@ -68,6 +68,7 @@ bool checkOneInstance(const Problem& problem, const Stmt& program, const Interpr
 bool verifyGeneralization(const Problem& problem, const Stmt& program, long stepLimit, std::string& outReason,
                            bool seedRecursionBounds) {
     Interpreter interp(stepLimit, /*maxRecursionDepth=*/200, seedRecursionBounds);
+    interp.setWrapArithmetic(problem.wrapArithmetic());
     // Exhaustive small-n check first (see Problem::exhaustiveInputs): every
     // input the problem can enumerate, not a sample from its generator.
     for (int n = 1;; ++n) {
@@ -121,6 +122,7 @@ bool verifyGeneralization(const Problem& problem, const Stmt& program, long step
 std::vector<TimingPoint> timeProgram(const Problem& problem, const Stmt& program, long stepLimit, const std::vector<int>& sizes,
                                       bool seedRecursionBounds) {
     Interpreter interp(stepLimit, /*maxRecursionDepth=*/200, seedRecursionBounds);
+    interp.setWrapArithmetic(problem.wrapArithmetic());
     std::vector<TimingPoint> out;
     for (int n : sizes) {
         Instance inst = problem.generateBenchmarkInstance(n, /*seed=*/12345);

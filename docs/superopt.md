@@ -14,8 +14,8 @@ Interface gaps (planned 2026-11-13), and their status:
 |---|---|---|
 | 0 | interpreter semantics match C (`gcc -fwrapv`, 32-bit `int`) | done (log 186) |
 | 1 | C -> Mini-C front end, Mini-C -> C emitter, round-trip check | done (log 186) |
-| 2 | `ReferenceProblem`: the original function is the oracle | next |
-| 3 | weighted cost model calibrated on compiled code; search seeded with the reference, objective cost given correctness | |
+| 2 | `ReferenceProblem`: the original function is the oracle | done (log 187) |
+| 3 | weighted cost model calibrated on compiled code; search seeded with the reference, objective cost given correctness | next |
 | 4 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | |
 | 5 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -69,12 +69,43 @@ is never changed by an int function. The output is equivalent to the Mini-C
 program on every input where that program completes without a runtime error.
 `call()` (recursion) cannot be emitted yet.
 
+## Reference problem (phase 2)
+
+`--problem c:FILE.c` (or `c:FILE.c:func`) searches against a C function:
+`ReferenceProblem` imports it and uses it as the oracle, so the expected
+result of any input is what the reference computes in wraparound mode.
+
+- Domain: an input on which the reference has a runtime error, or runs past
+  10M interpreter steps, is outside the function's domain. It never becomes an
+  instance and `isSolution` accepts any output on it. Note the second case: a
+  slow reference narrows its own domain at large magnitudes.
+- Levels: the array length for array functions (as in the array problems).
+  For scalar functions, every argument is drawn from [-M, M] with
+  M = 2^(L+1) - 1, exhaustively while the grid has at most 81 points, then
+  values near the bounds, powers of two (each at least once) and uniform
+  samples. From L = 30 on, M covers all of int and INT_MIN is included. Use
+  `--max-n 30` to reach the full range.
+- Verification (`--benchmark`, adversarial instances): arrays over [-2, 2]
+  up to n = 5 exhaustively; scalar functions on a grid around 0 (|x| <= 1024
+  for one argument, <= 64 for two, ...), and edge values over all of int.
+- Arithmetic: `Problem::wrapArithmetic()` returns true here, so the search's
+  and the verification's interpreters run in wraparound mode. Every other
+  problem keeps the old semantics (byte-identical, log 186-187).
+- Partial credit: positions already right, for void array functions only.
+- After the search, the confirmed (SUCCESS) solution that reached the highest
+  level, the smallest among those, is printed as C and written with `--c-out`.
+
 ## Tools
 
     ./algosearch c-import FILE.c [--func NAME]      # Mini-C translation
     ./algosearch c-import FILE.c --emit             # C regenerated from it
     ./algosearch c-import FILE.c --eval INPUTS      # interpreter result per input line
+    ./algosearch c-import FILE.c --program P --emit # C for another Mini-C program under FILE's ABI
     scripts/c_roundtrip.py tests/c_samples/*.c      # interpreter = original C = regenerated C
+    scripts/c_roundtrip.py FILE.c --candidate X.c   # a search result against the original
+
+    ./algosearch --problem c:tests/c_samples/array_sum.c --max-n 30 --beam-width 500 \
+        --candidates 1500 --max-program-size 150 --seed 2 --c-out found.c
 
 `c_roundtrip.py` compiles the original and the regenerated function with
 `gcc -O2 -fwrapv`, runs random and edge-case inputs through the interpreter and

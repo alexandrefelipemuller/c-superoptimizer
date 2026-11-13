@@ -851,9 +851,16 @@ struct Emitter {
     }
 
     // Returns whether the list ends in a return (so nothing after it runs).
-    bool list(const std::vector<StmtPtr>& b, int indent) {
+    // `topLevel`: the function body, whose last statement falls through to
+    // the implicit `return arr[0]`, so a result write there is a return too.
+    bool list(const std::vector<StmtPtr>& b, int indent, bool topLevel = false) {
         bool returned = false;
         for (size_t i = 0; i < b.size(); ++i) {
+            if (liftReturn && topLevel && i + 1 == b.size() && isResultWrite(*b[i])) {
+                out << std::string(static_cast<size_t>(indent) * 4, ' ') << "return " << cExpr(*b[i]->valueExpr, arrName)
+                    << ";\n";
+                return true;
+            }
             if (liftReturn && i + 1 < b.size() && isResultWrite(*b[i]) && b[i + 1]->kind == StmtKind::Return) {
                 out << std::string(static_cast<size_t>(indent) * 4, ' ') << "return " << cExpr(*b[i]->valueExpr, arrName)
                     << ";\n";
@@ -918,14 +925,15 @@ struct Emitter {
 };
 
 // Whether the program writes the array anywhere other than a result write
-// immediately followed by return.
-bool writesArrayBeyondResult(const std::vector<StmtPtr>& b) {
+// immediately followed by return (or, at top level, ending the function).
+bool writesArrayBeyondResult(const std::vector<StmtPtr>& b, bool topLevel = false) {
     for (size_t i = 0; i < b.size(); ++i) {
         const Stmt& s = *b[i];
         if (Emitter::isResultWrite(s) && i + 1 < b.size() && b[i + 1]->kind == StmtKind::Return) {
             ++i;
             continue;
         }
+        if (topLevel && i + 1 == b.size() && Emitter::isResultWrite(s)) continue;
         if (s.kind == StmtKind::AssignArray || s.kind == StmtKind::Swap) return true;
         if (writesArrayBeyondResult(s.body) || writesArrayBeyondResult(s.elseBody)) return true;
     }
@@ -989,7 +997,7 @@ std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
         out << "    int v0 = " << names[1] << ";\n";
         em.arrName = names[0];
         if (abi.returnsValue) {
-            if (writesArrayBeyondResult(program.body)) {
+            if (writesArrayBeyondResult(program.body, /*topLevel=*/true)) {
                 // The Mini-C program uses the array as scratch space; the C
                 // caller's array must stay as it was, so work on a copy.
                 out << "    int arr[v0 > 0 ? v0 : 1];\n";
@@ -1019,7 +1027,7 @@ std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
         out << "    int aux[v0 > 0 ? v0 : 1];\n";
         out << "    for (int k_ = 0; k_ < v0; k_++) aux[k_] = 0;\n";
     }
-    bool returned = em.stmt(program, 1);
+    bool returned = em.list(program.body, 1, /*topLevel=*/true);
     if (!returned && abi.returnsValue) out << "    return " << em.arrName << "[0];\n";
     out << "}\n";
     return out.str();

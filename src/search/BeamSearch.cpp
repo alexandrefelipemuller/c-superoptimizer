@@ -413,6 +413,7 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
     gForbidStmtMask.store(config_.forbidStmtMask);
     Random rng(config_.seed);
     Interpreter interp(config_.stepLimit, config_.maxRecursionDepth, config_.genConfig.recursionCallBias > 0.0);
+    interp.setWrapArithmetic(problem_.wrapArithmetic());
     Dedup dedup;
 
     std::vector<CandidateRecord> beam;
@@ -498,6 +499,7 @@ std::vector<SolutionRecord> BeamSearch::run(std::vector<Program>* outPrograms) {
     std::vector<CostProfile> archivedProfiles;
     std::map<int, std::vector<Instance>> probeCache;
     Interpreter probeInterp(config_.stepLimit * 50, config_.maxRecursionDepth, config_.genConfig.recursionCallBias > 0.0);
+    probeInterp.setWrapArithmetic(problem_.wrapArithmetic());
     long profileBonusesGiven = 0;
 
     int debugBestPrinted = -1;

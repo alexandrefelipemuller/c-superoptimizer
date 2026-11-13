@@ -169,8 +169,14 @@ TEST(c_emit_int_array_function_leaves_caller_array_untouched) {
     CHECK(c.find("a[0] =") == std::string::npos);
     CHECK(c.find("return v") != std::string::npos);
     // A program that uses the array as scratch space works on a copy.
-    CImport scratch = importCFunction("void f(int *a, int n) { a[0] = 1; }");
+    CImport scratch = importCFunction("void f(int *a, int n) { a[1] = 1; }");
     scratch.abi.returnsValue = true;
     std::string c2 = emitCFunction(*scratch.program, scratch.abi);
     CHECK(c2.find("int arr[v0 > 0 ? v0 : 1];") != std::string::npos);
+    // A result write that ends the function is a return, no copy needed.
+    CImport tail = importCFunction("void f(int *a, int n) { a[0] = 1; }");
+    tail.abi.returnsValue = true;
+    std::string c3 = emitCFunction(*tail.program, tail.abi);
+    CHECK(c3.find("return 1;") != std::string::npos);
+    CHECK(c3.find("int arr[") == std::string::npos);
 }

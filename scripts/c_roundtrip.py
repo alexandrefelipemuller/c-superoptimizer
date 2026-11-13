@@ -11,6 +11,7 @@ Every remaining input must give the same result three times, and at least
 --min-compared of the inputs must remain.
 
     scripts/c_roundtrip.py tests/c_samples/*.c [--inputs 2000] [--seed 1]
+    scripts/c_roundtrip.py tests/c_samples/f.c --candidate found.c   # a search result vs the original
 
 Exit status 1 if any file fails to import or any result differs.
 """
@@ -103,20 +104,25 @@ def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
-def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout):
+def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout, candidate=None):
     name = os.path.splitext(os.path.basename(path))[0]
     head = run([algosearch, "c-import", path])
     if head.returncode != 0:
         return False, f"import failed: {head.stderr.strip()}"
     m = re.match(r"// (\w+): abi=(\w+) returns=(\w+) params=(\d+)", head.stdout)
     func, abi, returns, params = m.group(1), m.group(2), m.group(3), int(m.group(4))
-    emitted = run([algosearch, "c-import", path, "--emit"])
-    if emitted.returncode != 0:
-        return False, f"emit failed: {emitted.stderr.strip()}"
+    if candidate:
+        with open(candidate) as f:
+            emitted_text = f.read()
+    else:
+        emitted = run([algosearch, "c-import", path, "--emit"])
+        if emitted.returncode != 0:
+            return False, f"emit failed: {emitted.stderr.strip()}"
+        emitted_text = emitted.stdout
     d = os.path.join(workdir, name)
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "emitted.c"), "w") as f:
-        f.write(emitted.stdout)
+        f.write(emitted_text)
     with open(os.path.join(d, "harness.c"), "w") as f:
         f.write(harness_source(abi, returns, params))
     cc = ["gcc", "-O2", "-fwrapv", "-w"]
@@ -169,16 +175,22 @@ def main():
     ap.add_argument("--inputs", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--algosearch", default="./algosearch")
+    ap.add_argument("--candidate", default=None,
+                    help="compare the (single) original against this C file, e.g. a search result written by "
+                         "--c-out, instead of the import's own regenerated C")
     ap.add_argument("--native-timeout", type=float, default=30, help="seconds per file for the compiled runs")
     ap.add_argument("--min-compared", type=float, default=0.5,
                     help="fail a file if fewer than this fraction of its inputs complete in the interpreter")
     ap.add_argument("--workdir", default=None, help="keep build files here (default: a temp dir)")
     args = ap.parse_args()
+    if args.candidate and len(args.files) != 1:
+        ap.error("--candidate takes exactly one original file")
     workdir = args.workdir or tempfile.mkdtemp(prefix="c_roundtrip_")
     rng = random.Random(args.seed)
     failed = 0
     for path in args.files:
-        ok, msg = check(path, args.algosearch, workdir, args.inputs, rng, args.min_compared, args.native_timeout)
+        ok, msg = check(path, args.algosearch, workdir, args.inputs, rng, args.min_compared, args.native_timeout,
+                        args.candidate)
         failed += not ok
         print(f"{'OK  ' if ok else 'FAIL'} {os.path.basename(path)}: {msg}")
     print(f"{len(args.files) - failed}/{len(args.files)} passed (build files in {workdir})")

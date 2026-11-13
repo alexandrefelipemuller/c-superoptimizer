@@ -122,6 +122,9 @@
 #include "search/BeamSearch.hpp"
 #include "search/Benchmark.hpp"
 #include "search/Persistence.hpp"
+#include "language/Parser.hpp"
+#include "problems/ReferenceProblem.hpp"
+#include "superopt/CFrontend.hpp"
 #include "search/SkeletonAblation.hpp"
 
 using namespace algosearch;
@@ -220,6 +223,7 @@ struct CliArgs {
     double dcShellSearchEnd = 0.0;  // section 123
     std::string adaptiveBiasLog;
     std::string output = "solutions.json";
+    std::string cOut;  // --problem c:FILE: where to write the C emitted from the best solution
     std::string checkpointPath;
     bool benchmark = false;
     bool fillTspGuard = false;
@@ -340,6 +344,7 @@ bool parseArgs(int argc, char** argv, CliArgs& args) {
         else if (arg == "--recursion-call-bias") args.recursionCallBias = std::stod(next("--recursion-call-bias"));
         else if (arg == "--adaptive-bias-log") args.adaptiveBiasLog = next("--adaptive-bias-log");
         else if (arg == "--output") args.output = next("--output");
+        else if (arg == "--c-out") args.cOut = next("--c-out");
         else if (arg == "--checkpoint-path") args.checkpointPath = next("--checkpoint-path");
         else if (arg == "--benchmark") args.benchmark = true;
         else if (arg == "--fill-tsp-guard") args.fillTspGuard = true;
@@ -368,7 +373,7 @@ void printUsage() {
                  "[--composite-bias 0.0] [--local-cond-mutation 0.3] [--no-local-cond-mutation] [--prune-generation] [--role-typed-vars] [--combinator-bias 0.5] [--combinator-v1] [--no-combinator-step] [--no-combinator-state] [--no-combinator-nested] [--no-combinator-frequency] [--combinator-follow] [--no-follow-pointer-inputs] [--no-combinator-orthogonal] [--no-combinator-argbest] [--no-combinator-distinct] [--regression-guard 12] [--no-follow-extended] [--no-scalar-loop] [--no-scalar-loop-index-range] [--no-combinator-triple] [--no-combinator-relax] [--no-combinator-grid] [--no-combinator-transform] [--no-distinct-aggregate] [--no-arg-sentinel] [--first-index] [--prefix-split] [--count-term P] [--square-term P] [--count-mod P] "
                  "[--adaptive-skeleton-bias-rate 0.0] [--adaptive-bias-log path.csv] "
                  "[--second-array-bias 0.0] [--recursion-call-bias 0.0] [--term-expr 0.3] [--prefix-cross 0.3] [--parity-term 0.03] [--pair-find 0.05] [--sum-if 0.05] [--radix 0.03] [--max-const 3] [--digit-loop 0.015] [--counter-mod 0.03] [--signed-parity 0.015] [--dc-shell-search 0.0] [--dc-shell-search-key 0.0] [--dc-shell-search-end 0.0] "
-                 "[--output solutions.json] [--checkpoint-path path.json] [--restart-on-stall K] [--wall-seconds S] [--max-executions N] [--confirm-reseed L] [--profile-novelty W] [--profile-ban] [--forbid-stmt swap|call|assignarray] [--start-size N] [--max-recursion-depth N] [--seed-programs file] "
+                 "[--output solutions.json] [--c-out FILE.c] [--checkpoint-path path.json] [--restart-on-stall K] [--wall-seconds S] [--max-executions N] [--confirm-reseed L] [--profile-novelty W] [--profile-ban] [--forbid-stmt swap|call|assignarray] [--start-size N] [--max-recursion-depth N] [--seed-programs file] "
                  "[--benchmark] [--benchmark-seeds 5] [--fill-tsp-guard [--soundness-labels] [--metamorphic [--rank-worst-scale]]] [--fill-bsearch-hole [--bsearch-stage 3]] [--ablate-skeleton NAME]\n";
 }
 
@@ -422,6 +427,22 @@ void resolveNumVars(CliArgs& args) {
 }
 
 std::unique_ptr<Problem> makeProblem(const std::string& name, int numVars, uint64_t seed) {
+    // Superoptimizer prototype (docs/superopt.md): `c:FILE.c` or `c:FILE.c:func`,
+    // the imported C function is the specification.
+    if (name.rfind("c:", 0) == 0) {
+        std::string path = name.substr(2), func;
+        size_t colon = path.rfind(':');
+        if (colon != std::string::npos && path.find(".c", colon) == std::string::npos) {
+            func = path.substr(colon + 1);
+            path = path.substr(0, colon);
+        }
+        try {
+            return ReferenceProblem::fromFile(path, func, numVars, seed);
+        } catch (const std::exception& e) {
+            std::cerr << path << ": " << e.what() << "\n";
+            std::exit(2);
+        }
+    }
     if (name == "sorting") return std::make_unique<SortingProblem>(6, 40, numVars, seed);
     if (name == "min") return std::make_unique<MinArrayProblem>(6, 40, numVars, seed);
     if (name == "max") return std::make_unique<MaxArrayProblem>(6, 40, numVars, seed);
@@ -1292,6 +1313,39 @@ void runFillBsearchHoleMode(const CliArgs& args) {
     }
 }
 
+// --problem c:FILE: prints (and with --c-out writes) the C emitted from the
+// confirmed (SUCCESS) solution that reached the highest level, the smallest
+// one among those.
+void emitReferenceSolution(const ReferenceProblem& ref, const std::vector<SolutionRecord>& solutions,
+                           const std::string& cOut) {
+    const SolutionRecord* best = nullptr;
+    for (const auto& r : solutions) {
+        if (r.finalStatus != "SUCCESS") continue;  // UNCONFIRMED: fit to one level's instances
+        if (!best || r.nReached > best->nReached || (r.nReached == best->nReached && r.programSize < best->programSize))
+            best = &r;
+    }
+    if (!best) {
+        std::cout << "\nNo confirmed solution to emit as C.\n";
+        return;
+    }
+    Program program = parseProgram(best->programText);
+    if (!program) {
+        std::cerr << "cannot re-parse the solution to emit C\n";
+        return;
+    }
+    try {
+        std::string c = emitCFunction(*program, ref.abi());
+        std::cout << "\nC for the solution reaching level " << best->nReached << " (size " << best->programSize
+                  << "; reference size " << ref.referenceProgram().size() << "):\n" << c;
+        if (!cOut.empty()) {
+            std::ofstream(cOut) << c;
+            std::cout << "Wrote " << cOut << "\n";
+        }
+    } catch (const CImportError& e) {
+        std::cerr << "cannot emit C: " << e.what() << "\n";
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "c-import") == 0) return runCImportTool(argc - 1, argv + 1);
     CliArgs args;
@@ -1440,6 +1494,7 @@ int main(int argc, char** argv) {
     } else {
         saveSolutions(args.output, solutions);
         std::cout << "\nSaved " << solutions.size() << " solution record(s) to " << args.output << "\n";
+        if (const auto* ref = dynamic_cast<const ReferenceProblem*>(problem.get())) emitReferenceSolution(*ref, solutions, args.cOut);
     }
 
     return 0;
