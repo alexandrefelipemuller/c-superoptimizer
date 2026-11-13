@@ -316,3 +316,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 181. One sorting profile through min_gap/max_gap_sorted: 60/60 solved, two families (selection 46, merge 14), quick 0 | 11_sections_121-125.md | 2030 |
 | 182. Retuned partition/range-shell: one profile reaches selection, merge and quick (P3: 38/14/9 of 60) | 11_sections_121-125.md | 2046 |
 | 183. Suite cost of the retuned sorting profile: 745 vs 759, rule not met, opt-in switch | 11_sections_121-125.md | 2068 |
+| 185. README results refreshed (759/770); gcd is O(log n), fitted O(1) is a benchmark-instance artifact | 11_sections_121-125.md | 2087 |
