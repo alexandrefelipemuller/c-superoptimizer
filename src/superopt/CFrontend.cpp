@@ -1,0 +1,1036 @@
+#include "superopt/CFrontend.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <climits>
+#include <map>
+#include <memory>
+#include <regex>
+#include <sstream>
+
+#include "ast/Expr.hpp"
+
+namespace algosearch {
+
+namespace {
+
+// ---------------------------------------------------------------- lexer
+
+enum class Tok { Ident, Number, Punct, End };
+
+struct Token {
+    Tok kind;
+    std::string text;
+    int line;
+    long long value = 0;
+};
+
+[[noreturn]] void failAt(int line, const std::string& what) {
+    throw CImportError("line " + std::to_string(line) + ": " + what);
+}
+
+std::vector<Token> lex(const std::string& src) {
+    static const char* puncts[] = {"<<=", ">>=", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "++", "--", "+=",
+                                   "-=",  "*=",  "/=", "%=", "&=", "|=", "^=", "->", "+",  "-",  "*",  "/",  "%",
+                                   "&",   "|",   "^",  "~",  "!",  "<",  ">",  "=",  "?",  ":",  ";",  ",",  "(",
+                                   ")",   "{",   "}",  "[",  "]",  "."};
+    std::vector<Token> out;
+    size_t i = 0;
+    int line = 1;
+    bool lineStart = true;
+    while (i < src.size()) {
+        char c = src[i];
+        if (c == '\n') {
+            ++line;
+            ++i;
+            lineStart = true;
+            continue;
+        }
+        if (std::isspace(static_cast<unsigned char>(c))) {
+            ++i;
+            continue;
+        }
+        if (lineStart && c == '#') {
+            size_t e = src.find('\n', i);
+            std::string directive = src.substr(i, e == std::string::npos ? std::string::npos : e - i);
+            if (!std::regex_search(directive, std::regex("^#\\s*include\\b")))
+                failAt(line, "preprocessor directive not supported (only #include is ignored): " + directive);
+            i = e == std::string::npos ? src.size() : e;
+            continue;
+        }
+        lineStart = false;
+        if (src.compare(i, 2, "//") == 0) {
+            while (i < src.size() && src[i] != '\n') ++i;
+            continue;
+        }
+        if (src.compare(i, 2, "/*") == 0) {
+            size_t e = src.find("*/", i + 2);
+            if (e == std::string::npos) failAt(line, "unterminated comment");
+            for (size_t k = i; k < e; ++k)
+                if (src[k] == '\n') ++line;
+            i = e + 2;
+            continue;
+        }
+        if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+            size_t s = i;
+            while (i < src.size() && (std::isalnum(static_cast<unsigned char>(src[i])) || src[i] == '_')) ++i;
+            out.push_back({Tok::Ident, src.substr(s, i - s), line});
+            continue;
+        }
+        if (std::isdigit(static_cast<unsigned char>(c))) {
+            size_t s = i;
+            while (i < src.size() && std::isalnum(static_cast<unsigned char>(src[i]))) ++i;
+            std::string text = src.substr(s, i - s);
+            size_t used = 0;
+            unsigned long long v = 0;
+            try {
+                v = std::stoull(text, &used, 0);
+            } catch (...) {
+                failAt(line, "bad integer literal " + text);
+            }
+            if (used != text.size()) failAt(line, "integer literal suffix not supported: " + text);
+            // INT_MAX + 1 is accepted only so that `-2147483648` can be written;
+            // the parser rejects it anywhere else.
+            if (v > static_cast<unsigned long long>(INT_MAX) + 1)
+                failAt(line, "integer literal does not fit in int: " + text);
+            Token t{Tok::Number, text, line};
+            t.value = static_cast<long long>(v);
+            out.push_back(t);
+            continue;
+        }
+        bool matched = false;
+        for (const char* p : puncts) {
+            size_t n = std::char_traits<char>::length(p);
+            if (src.compare(i, n, p) == 0) {
+                out.push_back({Tok::Punct, p, line});
+                i += n;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) failAt(line, std::string("unexpected character '") + c + "'");
+    }
+    out.push_back({Tok::End, "", line});
+    return out;
+}
+
+// ------------------------------------------------------ C expression tree
+
+struct CExpr {
+    std::string op;  // "num", "id", "index", unary "neg" "~" "!", binary C operator, "?:"
+    long long value = 0;
+    std::string name;
+    int line = 0;
+    std::vector<std::unique_ptr<CExpr>> kids;
+};
+using CExprPtr = std::unique_ptr<CExpr>;
+
+CExprPtr node(const std::string& op, int line) {
+    auto e = std::make_unique<CExpr>();
+    e->op = op;
+    e->line = line;
+    return e;
+}
+
+const std::map<std::string, ExprKind>& binaryKinds() {
+    static const std::map<std::string, ExprKind> m = {
+        {"+", ExprKind::Add},     {"-", ExprKind::Sub},    {"*", ExprKind::Mul},    {"/", ExprKind::Div},
+        {"%", ExprKind::Mod},     {"&", ExprKind::BitAnd}, {"|", ExprKind::BitOr},  {"^", ExprKind::BitXor},
+        {"<<", ExprKind::Shl},    {">>", ExprKind::Shr},   {"<", ExprKind::Lt},     {">", ExprKind::Gt},
+        {"<=", ExprKind::Le},     {">=", ExprKind::Ge},    {"==", ExprKind::Eq},    {"!=", ExprKind::Ne}};
+    return m;
+}
+
+// C binary precedence, higher binds tighter.
+int precedence(const std::string& op) {
+    if (op == "||") return 1;
+    if (op == "&&") return 2;
+    if (op == "|") return 3;
+    if (op == "^") return 4;
+    if (op == "&") return 5;
+    if (op == "==" || op == "!=") return 6;
+    if (op == "<" || op == ">" || op == "<=" || op == ">=") return 7;
+    if (op == "<<" || op == ">>") return 8;
+    if (op == "+" || op == "-") return 9;
+    if (op == "*" || op == "/" || op == "%") return 10;
+    return 0;
+}
+
+// Whether evaluating `e` can never be a runtime error, so evaluating it
+// eagerly (no short circuit) is unobservable.
+bool cannotFail(const CExpr& e) {
+    if (e.op == "index" || e.op == "/" || e.op == "%" || e.op == "<<" || e.op == ">>") return false;
+    for (const auto& k : e.kids)
+        if (!cannotFail(*k)) return false;
+    return true;
+}
+
+bool isBoolKind(ExprKind k) {
+    return k == ExprKind::Lt || k == ExprKind::Gt || k == ExprKind::Le || k == ExprKind::Ge || k == ExprKind::Eq ||
+           k == ExprKind::Ne;
+}
+
+// ------------------------------------------------------------- translator
+
+struct Translator {
+    std::vector<Token> toks;
+    size_t pos = 0;
+    CFunctionAbi abi;
+    std::string arrayName;  // Array ABI: the pointer parameter
+    std::vector<std::map<std::string, int>> scopes;
+    int nextVar = 1;
+    // Innermost loop first: whether `continue` can be translated directly
+    // (a while loop) or not (a for loop with a step, a do-while).
+    std::vector<bool> continueOk;
+
+    const Token& peek(size_t ahead = 0) const { return toks[std::min(pos + ahead, toks.size() - 1)]; }
+    bool isPunct(const char* p, size_t ahead = 0) const {
+        return peek(ahead).kind == Tok::Punct && peek(ahead).text == p;
+    }
+    bool isWord(const char* w, size_t ahead = 0) const {
+        return peek(ahead).kind == Tok::Ident && peek(ahead).text == w;
+    }
+    bool eat(const char* p) {
+        if (!isPunct(p)) return false;
+        ++pos;
+        return true;
+    }
+    void expect(const char* p) {
+        if (!eat(p)) failAt(peek().line, std::string("expected '") + p + "', found '" + peek().text + "'");
+    }
+    std::string ident() {
+        if (peek().kind != Tok::Ident) failAt(peek().line, "expected an identifier, found '" + peek().text + "'");
+        return toks[pos++].text;
+    }
+
+    // `int`, `const int`, `int32_t`; any other type is rejected.
+    bool atIntType() const {
+        size_t k = 0;
+        if (isWord("const", k)) ++k;
+        return isWord("int", k) || isWord("int32_t", k) || isWord("signed", k);
+    }
+    void intType() {
+        if (isWord("const")) ++pos;
+        std::string t = ident();
+        if (t == "signed" && isWord("int")) ++pos;
+        if (t != "int" && t != "int32_t" && t != "signed")
+            failAt(peek().line, "type '" + t + "' not supported (only int)");
+        if (isWord("const")) ++pos;
+    }
+    void rejectOtherTypes() {
+        static const char* other[] = {"unsigned", "long",   "short", "char",     "float",    "double", "uint32_t",
+                                      "int64_t",  "uint64_t", "size_t", "_Bool",  "bool",     "struct", "union",
+                                      "enum",     "typedef", "goto",   "switch", "uint8_t",  "int8_t", "int16_t",
+                                      "uint16_t"};
+        if (peek().kind != Tok::Ident) return;
+        for (const char* w : other)
+            if (peek().text == w) failAt(peek().line, "'" + peek().text + "' not supported in this prototype");
+    }
+
+    int lookup(const std::string& name, int line) const {
+        for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
+            auto f = it->find(name);
+            if (f != it->end()) return f->second;
+        }
+        if (name == arrayName) failAt(line, "array '" + name + "' used as a value (pointer arithmetic not supported)");
+        failAt(line, "unknown identifier '" + name + "'");
+    }
+
+    // ------------------------------------------------------ expressions
+
+    CExprPtr parseExpr() { return parseConditional(); }
+
+    CExprPtr parseConditional() {
+        CExprPtr c = parseBinary(1);
+        if (!isPunct("?")) return c;
+        int line = peek().line;
+        ++pos;
+        auto e = node("?:", line);
+        e->kids.push_back(std::move(c));
+        e->kids.push_back(parseExpr());
+        expect(":");
+        e->kids.push_back(parseConditional());
+        return e;
+    }
+
+    CExprPtr parseBinary(int minPrec) {
+        CExprPtr lhs = parseUnary();
+        for (;;) {
+            if (peek().kind != Tok::Punct) return lhs;
+            std::string op = peek().text;
+            int p = precedence(op);
+            if (p == 0 || p < minPrec) return lhs;
+            int line = peek().line;
+            ++pos;
+            CExprPtr rhs = parseBinary(p + 1);
+            auto e = node(op, line);
+            e->kids.push_back(std::move(lhs));
+            e->kids.push_back(std::move(rhs));
+            lhs = std::move(e);
+        }
+    }
+
+    CExprPtr parseUnary() {
+        int line = peek().line;
+        if (eat("-")) {
+            CExprPtr k = parseUnary();
+            if (k->op == "num") {
+                k->value = -k->value;
+                return k;
+            }
+            auto e = node("neg", line);
+            e->kids.push_back(std::move(k));
+            return e;
+        }
+        if (eat("+")) return parseUnary();
+        if (isPunct("~") || isPunct("!")) {
+            auto e = node(toks[pos++].text, line);
+            e->kids.push_back(parseUnary());
+            return e;
+        }
+        if (isPunct("++") || isPunct("--") || isPunct("*") || isPunct("&"))
+            failAt(line, "'" + peek().text + "' inside an expression not supported (side effects / pointers)");
+        // A cast to int is a no-op; any other cast is rejected by intType().
+        if (isPunct("(") && (atIntTypeAt(1))) {
+            ++pos;
+            intType();
+            expect(")");
+            return parseUnary();
+        }
+        return parsePostfix();
+    }
+
+    bool atIntTypeAt(size_t ahead) const {
+        size_t k = ahead;
+        if (isWord("const", k)) ++k;
+        if (isWord("unsigned", k) || isWord("long", k) || isWord("short", k) || isWord("char", k))
+            failAt(peek().line, "cast to '" + peek(k).text + "' not supported");
+        return isWord("int", k) || isWord("int32_t", k);
+    }
+
+    CExprPtr parsePostfix() {
+        const Token& t = peek();
+        CExprPtr e;
+        if (t.kind == Tok::Number) {
+            e = node("num", t.line);
+            e->value = t.value;
+            ++pos;
+        } else if (t.kind == Tok::Ident) {
+            e = node("id", t.line);
+            e->name = t.text;
+            ++pos;
+            if (isPunct("(")) failAt(t.line, "function calls not supported ('" + t.text + "')");
+            if (isPunct("[")) {
+                if (t.text != arrayName) failAt(t.line, "'" + t.text + "' is not the array parameter");
+                ++pos;
+                auto ix = node("index", t.line);
+                ix->kids.push_back(parseExpr());
+                expect("]");
+                e = std::move(ix);
+            }
+        } else if (eat("(")) {
+            e = parseExpr();
+            if (isPunct(",")) failAt(peek().line, "comma operator not supported");
+            expect(")");
+        } else {
+            failAt(t.line, "unexpected '" + t.text + "' in expression");
+        }
+        static const char* assigns[] = {"=",  "++", "--", "+=", "-=", "*=",  "/=",
+                                        "%=", "&=", "|=", "^=", "<<=", ">>="};
+        for (const char* a : assigns)
+            if (isPunct(a)) failAt(peek().line, "assignment inside an expression not supported");
+        return e;
+    }
+
+    int newTemp() { return nextVar++; }
+
+    static ExprPtr truth(ExprPtr e) {
+        if (isBoolKind(e->kind)) return e;
+        return makeBinOp(ExprKind::Ne, std::move(e), makeIntConst(0));
+    }
+
+    // Lowers a C expression to a pure Mini-C expression, appending to `pre`
+    // the statements that must run first (short-circuit and ?: temporaries).
+    ExprPtr lower(const CExpr& e, std::vector<StmtPtr>& pre) {
+        if (e.op == "num") {
+            if (e.value > INT_MAX) failAt(e.line, "integer literal does not fit in int");
+            return makeIntConst(static_cast<int>(e.value));
+        }
+        if (e.op == "id") return makeVar(lookup(e.name, e.line));
+        if (e.op == "index") return makeArrayAccess(lower(*e.kids[0], pre));
+        if (e.op == "neg") return makeBinOp(ExprKind::Sub, makeIntConst(0), lower(*e.kids[0], pre));
+        if (e.op == "~") return makeBinOp(ExprKind::BitXor, lower(*e.kids[0], pre), makeIntConst(-1));
+        if (e.op == "!") return makeBinOp(ExprKind::Eq, lower(*e.kids[0], pre), makeIntConst(0));
+        if (e.op == "&&" || e.op == "||") {
+            bool isAnd = e.op == "&&";
+            ExprPtr a = truth(lower(*e.kids[0], pre));
+            if (cannotFail(*e.kids[1])) {
+                std::vector<StmtPtr> inner;
+                ExprPtr b = truth(lower(*e.kids[1], inner));
+                if (inner.empty())
+                    return makeBinOp(isAnd ? ExprKind::BitAnd : ExprKind::BitOr, std::move(a), std::move(b));
+            }
+            int t = newTemp();
+            pre.push_back(makeAssign(t, std::move(a)));
+            std::vector<StmtPtr> body;
+            ExprPtr b = truth(lower(*e.kids[1], body));
+            body.push_back(makeAssign(t, std::move(b)));
+            ExprPtr guard = isAnd ? makeVar(t) : makeBinOp(ExprKind::Eq, makeVar(t), makeIntConst(0));
+            pre.push_back(makeIf(std::move(guard), std::move(body)));
+            return makeVar(t);
+        }
+        if (e.op == "?:") {
+            ExprPtr c = lower(*e.kids[0], pre);
+            int t = newTemp();
+            std::vector<StmtPtr> thenBody, elseBody;
+            ExprPtr x = lower(*e.kids[1], thenBody);
+            thenBody.push_back(makeAssign(t, std::move(x)));
+            ExprPtr y = lower(*e.kids[2], elseBody);
+            elseBody.push_back(makeAssign(t, std::move(y)));
+            pre.push_back(makeIf(std::move(c), std::move(thenBody), std::move(elseBody)));
+            return makeVar(t);
+        }
+        auto k = binaryKinds().find(e.op);
+        if (k == binaryKinds().end()) failAt(e.line, "operator '" + e.op + "' not supported");
+        ExprPtr a = lower(*e.kids[0], pre);
+        ExprPtr b = lower(*e.kids[1], pre);
+        return makeBinOp(k->second, std::move(a), std::move(b));
+    }
+
+    // ------------------------------------------------------- statements
+
+    void appendAll(std::vector<StmtPtr>& out, std::vector<StmtPtr>& more) {
+        for (auto& s : more) out.push_back(std::move(s));
+        more.clear();
+    }
+
+    // A statement, or a braced block, as a list (a single statement body
+    // opens its own scope too).
+    std::vector<StmtPtr> body() {
+        std::vector<StmtPtr> out;
+        scopes.emplace_back();
+        if (eat("{")) {
+            while (!eat("}")) {
+                if (peek().kind == Tok::End) failAt(peek().line, "unexpected end of file");
+                statement(out);
+            }
+        } else {
+            statement(out);
+        }
+        scopes.pop_back();
+        return out;
+    }
+
+    // `x = e`, `x op= e`, `x++`, `++x`, `a[i] = e`, ... without the `;`.
+    void simpleStatement(std::vector<StmtPtr>& out) {
+        int line = peek().line;
+        std::string prefix;
+        if (isPunct("++") || isPunct("--")) prefix = toks[pos++].text;
+        if (peek().kind != Tok::Ident) failAt(line, "expected an assignment, found '" + peek().text + "'");
+        std::string name = ident();
+        CExprPtr index;
+        if (eat("[")) {
+            if (name != arrayName) failAt(line, "'" + name + "' is not the array parameter");
+            index = parseExpr();
+            expect("]");
+        }
+        if (isPunct("(")) failAt(line, "function calls not supported ('" + name + "')");
+        std::string op;  // "=" or the binary operator of a compound/increment
+        bool increment = false;
+        if (!prefix.empty()) {
+            op = prefix == "++" ? "+" : "-";
+            increment = true;
+        } else if (isPunct("++") || isPunct("--")) {
+            op = toks[pos++].text == "++" ? "+" : "-";
+            increment = true;
+        } else if (eat("=")) {
+            op = "=";
+        } else {
+            static const char* compound[] = {"+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="};
+            for (const char* c : compound)
+                if (op.empty() && isPunct(c)) {
+                    op = std::string(c).substr(0, std::char_traits<char>::length(c) - 1);
+                    ++pos;
+                }
+            if (op.empty()) failAt(line, "expression statement without an assignment not supported");
+        }
+        std::vector<StmtPtr> pre;
+        ExprPtr ix = index ? lower(*index, pre) : nullptr;
+        int var = index ? -1 : lookup(name, line);
+        ExprPtr value;
+        if (op == "=") {
+            value = lower(*parseExpr(), pre);
+            if (isPunct("=")) failAt(line, "chained assignment not supported");
+        } else {
+            ExprPtr cur = index ? makeArrayAccess(ix->clone()) : makeVar(var);
+            ExprPtr operand = increment ? makeIntConst(1) : lower(*parseExpr(), pre);
+            value = makeBinOp(binaryKinds().at(op), std::move(cur), std::move(operand));
+        }
+        appendAll(out, pre);
+        if (index) {
+            out.push_back(makeAssignArray(std::move(ix), std::move(value)));
+        } else {
+            out.push_back(makeAssign(var, std::move(value)));
+        }
+    }
+
+    void declaration(std::vector<StmtPtr>& out) {
+        intType();
+        for (;;) {
+            int line = peek().line;
+            if (isPunct("*")) failAt(line, "local pointers not supported");
+            std::string name = ident();
+            if (isPunct("[")) failAt(line, "local arrays not supported");
+            int v = nextVar++;
+            if (eat("=")) {
+                std::vector<StmtPtr> pre;
+                ExprPtr init = lower(*parseExpr(), pre);
+                appendAll(out, pre);
+                out.push_back(makeAssign(v, std::move(init)));
+            }
+            // Declared after the initializer, as in C: `int x = x;` reads an outer x.
+            scopes.back()[name] = v;
+            if (eat(";")) return;
+            expect(",");
+        }
+    }
+
+    // A loop condition: `pre` (if any) is re-run before each test.
+    void loopCondition(const CExpr* cond, std::vector<StmtPtr>& pre, ExprPtr& test) {
+        if (cond == nullptr) {
+            test = makeIntConst(1);
+            return;
+        }
+        test = lower(*cond, pre);
+    }
+
+    StmtPtr breakUnless(ExprPtr test) {
+        std::vector<StmtPtr> b;
+        b.push_back(makeBreak());
+        return makeIf(makeBinOp(ExprKind::Eq, std::move(test), makeIntConst(0)), std::move(b));
+    }
+
+    void statement(std::vector<StmtPtr>& out) {
+        rejectOtherTypes();
+        int line = peek().line;
+        if (isPunct("{")) {
+            auto b = body();
+            appendAll(out, b);
+            return;
+        }
+        if (eat(";")) return;
+        if (atIntType()) {
+            declaration(out);
+            return;
+        }
+        if (isWord("if")) {
+            ++pos;
+            expect("(");
+            CExprPtr c = parseExpr();
+            expect(")");
+            std::vector<StmtPtr> pre;
+            ExprPtr test = lower(*c, pre);
+            auto thenBody = body();
+            std::vector<StmtPtr> elseBody;
+            if (isWord("else")) {
+                ++pos;
+                elseBody = body();
+            }
+            appendAll(out, pre);
+            out.push_back(makeIf(std::move(test), std::move(thenBody), std::move(elseBody)));
+            return;
+        }
+        if (isWord("while")) {
+            ++pos;
+            expect("(");
+            CExprPtr c = parseExpr();
+            expect(")");
+            std::vector<StmtPtr> pre;
+            ExprPtr test;
+            loopCondition(c.get(), pre, test);
+            continueOk.push_back(true);
+            auto loopBody = body();
+            continueOk.pop_back();
+            if (pre.empty()) {
+                out.push_back(makeWhile(std::move(test), std::move(loopBody)));
+            } else {
+                // `continue` lands on while(1)'s check, which re-runs `pre`.
+                pre.push_back(breakUnless(std::move(test)));
+                appendAll(pre, loopBody);
+                out.push_back(makeWhile(makeIntConst(1), std::move(pre)));
+            }
+            return;
+        }
+        if (isWord("do")) {
+            ++pos;
+            continueOk.push_back(false);
+            auto loopBody = body();
+            continueOk.pop_back();
+            if (!isWord("while")) failAt(peek().line, "expected 'while' after do body");
+            ++pos;
+            expect("(");
+            CExprPtr c = parseExpr();
+            expect(")");
+            expect(";");
+            std::vector<StmtPtr> pre;
+            ExprPtr test = lower(*c, pre);
+            appendAll(loopBody, pre);
+            loopBody.push_back(breakUnless(std::move(test)));
+            out.push_back(makeWhile(makeIntConst(1), std::move(loopBody)));
+            return;
+        }
+        if (isWord("for")) {
+            ++pos;
+            expect("(");
+            scopes.emplace_back();
+            std::vector<StmtPtr> init;
+            if (atIntType()) {
+                declaration(init);  // consumes the ';'
+            } else {
+                if (!isPunct(";")) {
+                    simpleStatement(init);
+                    while (eat(",")) simpleStatement(init);
+                }
+                expect(";");
+            }
+            CExprPtr c;
+            if (!isPunct(";")) c = parseExpr();
+            expect(";");
+            std::vector<StmtPtr> step;
+            if (!isPunct(")")) {
+                simpleStatement(step);
+                while (eat(",")) simpleStatement(step);
+            }
+            expect(")");
+            std::vector<StmtPtr> pre;
+            ExprPtr test;
+            loopCondition(c.get(), pre, test);
+            continueOk.push_back(step.empty());
+            auto loopBody = body();
+            continueOk.pop_back();
+            scopes.pop_back();
+            appendAll(loopBody, step);
+            appendAll(out, init);
+            if (pre.empty()) {
+                out.push_back(makeWhile(std::move(test), std::move(loopBody)));
+            } else {
+                pre.push_back(breakUnless(std::move(test)));
+                appendAll(pre, loopBody);
+                out.push_back(makeWhile(makeIntConst(1), std::move(pre)));
+            }
+            return;
+        }
+        if (isWord("break")) {
+            ++pos;
+            expect(";");
+            if (continueOk.empty()) failAt(line, "break outside a loop");
+            out.push_back(makeBreak());
+            return;
+        }
+        if (isWord("continue")) {
+            ++pos;
+            expect(";");
+            if (continueOk.empty()) failAt(line, "continue outside a loop");
+            if (!continueOk.back())
+                failAt(line, "continue inside a for loop with a step or a do-while not supported yet");
+            out.push_back(makeContinue());
+            return;
+        }
+        if (isWord("return")) {
+            ++pos;
+            if (abi.returnsValue) {
+                if (isPunct(";")) failAt(line, "return without a value in an int function");
+                std::vector<StmtPtr> pre;
+                ExprPtr v = lower(*parseExpr(), pre);
+                appendAll(out, pre);
+                out.push_back(makeAssignArray(makeIntConst(0), std::move(v)));
+            } else if (!isPunct(";")) {
+                failAt(line, "return with a value in a void function");
+            }
+            expect(";");
+            out.push_back(makeReturn());
+            return;
+        }
+        simpleStatement(out);
+        expect(";");
+    }
+
+    // ------------------------------------------------- top level / ABI
+
+    struct Definition {
+        std::string name;
+        size_t start;  // token index of the return type
+    };
+
+    std::vector<Definition> findDefinitions() {
+        std::vector<Definition> defs;
+        while (peek().kind != Tok::End) {
+            size_t start = pos;
+            while (isWord("static") || isWord("inline")) ++pos;
+            rejectOtherTypes();
+            if (!(isWord("int") || isWord("int32_t") || isWord("void")))
+                failAt(peek().line, "expected a function definition, found '" + peek().text + "'");
+            ++pos;
+            std::string name = ident();
+            if (!isPunct("(")) failAt(peek().line, "only function definitions are supported at top level");
+            int depth = 0;
+            do {
+                if (peek().kind == Tok::End) failAt(peek().line, "unexpected end of file");
+                if (isPunct("(")) ++depth;
+                if (isPunct(")")) --depth;
+                ++pos;
+            } while (depth > 0);
+            if (eat(";")) continue;  // prototype
+            if (!isPunct("{")) failAt(peek().line, "expected a function body");
+            depth = 0;
+            do {
+                if (peek().kind == Tok::End) failAt(peek().line, "unexpected end of file");
+                if (isPunct("{")) ++depth;
+                if (isPunct("}")) --depth;
+                ++pos;
+            } while (depth > 0);
+            defs.push_back({name, start});
+        }
+        return defs;
+    }
+
+    std::vector<StmtPtr> signature() {
+        while (isWord("static") || isWord("inline")) ++pos;
+        abi.returnsValue = !isWord("void");
+        ++pos;
+        abi.name = ident();
+        expect("(");
+        struct Param {
+            std::string name;
+            bool pointer;
+            int line;
+        };
+        std::vector<Param> params;
+        if (isWord("void") && isPunct(")", 1)) ++pos;
+        while (!eat(")")) {
+            if (!params.empty()) expect(",");
+            int line = peek().line;
+            rejectOtherTypes();
+            intType();
+            bool pointer = eat("*");
+            if (pointer && isWord("const")) ++pos;
+            Param p{ident(), pointer, line};
+            if (eat("[")) {
+                expect("]");
+                p.pointer = true;
+            }
+            params.push_back(p);
+        }
+        std::vector<StmtPtr> prologue;
+        scopes.emplace_back();
+        bool anyPointer = false;
+        for (const auto& p : params) anyPointer = anyPointer || p.pointer;
+        if (anyPointer) {
+            if (params.size() != 2 || !params[0].pointer || params[1].pointer)
+                failAt(params[0].line, "array functions must have the form f(int *a, int n)");
+            abi.kind = CFunctionAbi::Kind::Array;
+            arrayName = params[0].name;
+            scopes.back()[params[1].name] = 0;
+        } else {
+            if (params.empty()) failAt(peek().line, "functions without parameters not supported");
+            if (!abi.returnsValue) failAt(peek().line, "a void function of scalars has no observable result");
+            abi.kind = CFunctionAbi::Kind::Scalars;
+            for (size_t i = 0; i < params.size(); ++i) {
+                int v = nextVar++;
+                scopes.back()[params[i].name] = v;
+                prologue.push_back(makeAssign(v, makeArrayAccess(makeIntConst(static_cast<int>(i)))));
+            }
+        }
+        for (const auto& p : params) abi.params.push_back(p.name);
+        return prologue;
+    }
+};
+
+void renameVar(Expr& e, int from, int to) {
+    if (e.kind == ExprKind::Var && e.varIndex == from) e.varIndex = to;
+    if (e.lhs) renameVar(*e.lhs, from, to);
+    if (e.rhs) renameVar(*e.rhs, from, to);
+}
+
+void renameVar(Stmt& s, int from, int to) {
+    if (s.kind == StmtKind::Assign && s.varIndex == from) s.varIndex = to;
+    for (Expr* e : {s.valueExpr.get(), s.indexExpr.get(), s.indexExpr2.get(), s.cond.get()})
+        if (e) renameVar(*e, from, to);
+    for (auto& b : s.body) renameVar(*b, from, to);
+    for (auto& b : s.elseBody) renameVar(*b, from, to);
+}
+
+bool writesVar(const Stmt& s, int v) {
+    if (s.kind == StmtKind::Assign && s.varIndex == v) return true;
+    for (const auto& b : s.body)
+        if (writesVar(*b, v)) return true;
+    for (const auto& b : s.elseBody)
+        if (writesVar(*b, v)) return true;
+    return false;
+}
+
+bool usesStmt(const Stmt& s, StmtKind kind) {
+    if (s.kind == kind) return true;
+    for (const auto& b : s.body)
+        if (usesStmt(*b, kind)) return true;
+    for (const auto& b : s.elseBody)
+        if (usesStmt(*b, kind)) return true;
+    return false;
+}
+
+bool usesAuxExpr(const Expr* e) {
+    if (!e) return false;
+    return e->kind == ExprKind::AuxAccess || usesAuxExpr(e->lhs.get()) || usesAuxExpr(e->rhs.get());
+}
+
+bool usesAux(const Stmt& s) {
+    if (s.kind == StmtKind::AssignAux) return true;
+    for (const Expr* e : {s.valueExpr.get(), s.indexExpr.get(), s.indexExpr2.get(), s.cond.get()})
+        if (usesAuxExpr(e)) return true;
+    for (const auto& b : s.body)
+        if (usesAux(*b)) return true;
+    for (const auto& b : s.elseBody)
+        if (usesAux(*b)) return true;
+    return false;
+}
+
+int maxVar(const Expr* e) {
+    if (!e) return -1;
+    int m = e->kind == ExprKind::Var ? e->varIndex : -1;
+    return std::max({m, maxVar(e->lhs.get()), maxVar(e->rhs.get())});
+}
+
+int maxVar(const Stmt& s) {
+    int m = s.kind == StmtKind::Assign ? s.varIndex : -1;
+    for (const Expr* e : {s.valueExpr.get(), s.indexExpr.get(), s.indexExpr2.get(), s.cond.get()})
+        m = std::max(m, maxVar(e));
+    for (const auto& b : s.body) m = std::max(m, maxVar(*b));
+    for (const auto& b : s.elseBody) m = std::max(m, maxVar(*b));
+    return m;
+}
+
+// ---------------------------------------------------------------- emitter
+
+std::string cExpr(const Expr& e, const std::string& arrName) {
+    switch (e.kind) {
+        case ExprKind::IntConst:
+            if (e.intValue == INT_MIN) return "(-2147483647 - 1)";
+            return e.intValue < 0 ? "(" + std::to_string(e.intValue) + ")" : std::to_string(e.intValue);
+        case ExprKind::Var:
+            return "v" + std::to_string(e.varIndex);
+        case ExprKind::ArrayAccess:
+            return arrName + "[" + cExpr(*e.lhs, arrName) + "]";
+        case ExprKind::AuxAccess:
+            return "aux[" + cExpr(*e.lhs, arrName) + "]";
+        case ExprKind::Shl:
+            return "((int)((unsigned)" + cExpr(*e.lhs, arrName) + " << " + cExpr(*e.rhs, arrName) + "))";
+        default:
+            break;
+    }
+    static const std::map<ExprKind, const char*> sym = {
+        {ExprKind::Add, "+"},  {ExprKind::Sub, "-"},     {ExprKind::Mul, "*"},    {ExprKind::Div, "/"},
+        {ExprKind::Mod, "%"},  {ExprKind::BitAnd, "&"},  {ExprKind::BitOr, "|"},  {ExprKind::BitXor, "^"},
+        {ExprKind::Shr, ">>"}, {ExprKind::Lt, "<"},      {ExprKind::Gt, ">"},     {ExprKind::Le, "<="},
+        {ExprKind::Ge, ">="},  {ExprKind::Eq, "=="},     {ExprKind::Ne, "!="}};
+    return "(" + cExpr(*e.lhs, arrName) + " " + sym.at(e.kind) + " " + cExpr(*e.rhs, arrName) + ")";
+}
+
+struct Emitter {
+    std::ostringstream out;
+    const CFunctionAbi& abi;
+    std::string arrName;
+    // Print `arr[0] = E; return;` as `return E;` (an int array function whose
+    // only array write is its result, so the caller's array stays untouched).
+    bool liftReturn = false;
+
+    explicit Emitter(const CFunctionAbi& a) : abi(a) {}
+
+    static bool isResultWrite(const Stmt& s) {
+        return s.kind == StmtKind::AssignArray && s.indexExpr->kind == ExprKind::IntConst &&
+               s.indexExpr->intValue == 0;
+    }
+
+    // Returns whether the list ends in a return (so nothing after it runs).
+    bool list(const std::vector<StmtPtr>& b, int indent) {
+        bool returned = false;
+        for (size_t i = 0; i < b.size(); ++i) {
+            if (liftReturn && i + 1 < b.size() && isResultWrite(*b[i]) && b[i + 1]->kind == StmtKind::Return) {
+                out << std::string(static_cast<size_t>(indent) * 4, ' ') << "return " << cExpr(*b[i]->valueExpr, arrName)
+                    << ";\n";
+                ++i;
+                returned = true;
+                continue;
+            }
+            returned = stmt(*b[i], indent);
+        }
+        return returned;
+    }
+
+    bool stmt(const Stmt& s, int indent) {
+        std::string pad(static_cast<size_t>(indent) * 4, ' ');
+        switch (s.kind) {
+            case StmtKind::Block:
+                return list(s.body, indent);
+            case StmtKind::Assign:
+                out << pad << "v" << s.varIndex << " = " << cExpr(*s.valueExpr, arrName) << ";\n";
+                return false;
+            case StmtKind::AssignArray:
+                out << pad << arrName << "[" << cExpr(*s.indexExpr, arrName) << "] = " << cExpr(*s.valueExpr, arrName)
+                    << ";\n";
+                return false;
+            case StmtKind::AssignAux:
+                out << pad << "aux[" << cExpr(*s.indexExpr, arrName) << "] = " << cExpr(*s.valueExpr, arrName)
+                    << ";\n";
+                return false;
+            case StmtKind::If:
+                out << pad << "if (" << cExpr(*s.cond, arrName) << ") {\n";
+                list(s.body, indent + 1);
+                if (!s.elseBody.empty()) {
+                    out << pad << "} else {\n";
+                    list(s.elseBody, indent + 1);
+                }
+                out << pad << "}\n";
+                return false;
+            case StmtKind::While:
+                out << pad << "while (" << cExpr(*s.cond, arrName) << ") {\n";
+                list(s.body, indent + 1);
+                out << pad << "}\n";
+                return false;
+            case StmtKind::Swap:
+                out << pad << "{ int i_ = " << cExpr(*s.indexExpr, arrName) << ", j_ = "
+                    << cExpr(*s.indexExpr2, arrName) << "; int t_ = " << arrName << "[i_]; " << arrName
+                    << "[i_] = " << arrName << "[j_]; " << arrName << "[j_] = t_; }\n";
+                return false;
+            case StmtKind::Return:
+                out << pad << (abi.returnsValue ? "return " + arrName + "[0];\n" : std::string("return;\n"));
+                return true;
+            case StmtKind::Continue:
+                out << pad << "continue;\n";
+                return false;
+            case StmtKind::Break:
+                out << pad << "break;\n";
+                return false;
+            case StmtKind::Call:
+                break;
+        }
+        throw CImportError("emitting call() (recursion) as C is not supported yet");
+    }
+};
+
+// Whether the program writes the array anywhere other than a result write
+// immediately followed by return.
+bool writesArrayBeyondResult(const std::vector<StmtPtr>& b) {
+    for (size_t i = 0; i < b.size(); ++i) {
+        const Stmt& s = *b[i];
+        if (Emitter::isResultWrite(s) && i + 1 < b.size() && b[i + 1]->kind == StmtKind::Return) {
+            ++i;
+            continue;
+        }
+        if (s.kind == StmtKind::AssignArray || s.kind == StmtKind::Swap) return true;
+        if (writesArrayBeyondResult(s.body) || writesArrayBeyondResult(s.elseBody)) return true;
+    }
+    return false;
+}
+
+bool reservedName(const std::string& n) {
+    static const std::regex r("^(v[0-9]+|arr|aux|i_|j_|t_|k_)$");
+    return std::regex_match(n, r);
+}
+
+}  // namespace
+
+CImport importCFunction(const std::string& source, const std::string& funcName) {
+    Translator t;
+    t.toks = lex(source);
+    auto defs = t.findDefinitions();
+    const Translator::Definition* chosen = nullptr;
+    std::string names;
+    for (const auto& d : defs) {
+        names += (names.empty() ? "" : ", ") + d.name;
+        if (funcName.empty() ? defs.size() == 1 : d.name == funcName) chosen = &d;
+    }
+    if (chosen == nullptr) {
+        if (defs.empty()) throw CImportError("no function definition found");
+        throw CImportError(funcName.empty() ? "several functions (" + names + "): choose one with --func"
+                                            : "function '" + funcName + "' not found (have: " + names + ")");
+    }
+    t.pos = chosen->start;
+    std::vector<StmtPtr> prologue = t.signature();
+    std::vector<StmtPtr> body = t.body();
+
+    Program program = makeBlock();
+    for (auto& s : prologue) program->body.push_back(std::move(s));
+    for (auto& s : body) program->body.push_back(std::move(s));
+
+    // v0 is the array length register; a function that writes its length
+    // parameter gets a private copy instead.
+    if (t.abi.kind == CFunctionAbi::Kind::Array && writesVar(*program, 0)) {
+        int copy = t.nextVar++;
+        renameVar(*program, 0, copy);
+        program->body.insert(program->body.begin(), makeAssign(copy, makeVar(0)));
+    }
+    t.abi.numVars = std::max(t.nextVar, maxVar(*program) + 1);
+    return {std::move(program), t.abi};
+}
+
+std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
+    if (usesStmt(program, StmtKind::Call)) throw CImportError("emitting call() (recursion) as C is not supported yet");
+    std::vector<std::string> names = abi.params;
+    for (size_t i = 0; i < names.size(); ++i)
+        if (reservedName(names[i])) names[i] = "p" + std::to_string(i) + "_";
+    int numVars = std::max(abi.numVars, maxVar(program) + 1);
+
+    Emitter em(abi);
+    std::ostringstream& out = em.out;
+    out << "/* Generated by algosearch from Mini-C; compile with -fwrapv. */\n";
+    out << (abi.returnsValue ? "int " : "void ") << abi.name << "(";
+    if (abi.kind == CFunctionAbi::Kind::Array) {
+        out << "int *" << names[0] << ", int " << names[1] << ") {\n";
+        out << "    int v0 = " << names[1] << ";\n";
+        em.arrName = names[0];
+        if (abi.returnsValue) {
+            if (writesArrayBeyondResult(program.body)) {
+                // The Mini-C program uses the array as scratch space; the C
+                // caller's array must stay as it was, so work on a copy.
+                out << "    int arr[v0 > 0 ? v0 : 1];\n";
+                out << "    for (int k_ = 0; k_ < v0; k_++) arr[k_] = " << names[0] << "[k_];\n";
+                em.arrName = "arr";
+            } else {
+                em.liftReturn = true;
+            }
+        }
+    } else {
+        for (size_t i = 0; i < names.size(); ++i) out << (i ? ", " : "") << "int " << names[i];
+        out << ") {\n";
+        out << "    int arr[" << names.size() << "] = {";
+        for (size_t i = 0; i < names.size(); ++i) out << (i ? ", " : "") << names[i];
+        out << "};\n";
+        out << "    int v0 = " << names.size() << ";\n";
+        em.arrName = "arr";
+        em.liftReturn = true;
+    }
+    if (numVars > 1) {
+        out << "    int";
+        for (int v = 1; v < numVars; ++v) out << (v > 1 ? "," : "") << " v" << v << " = 0";
+        out << ";\n";
+    }
+    out << "    (void)v0;\n";
+    if (usesAux(program)) {
+        out << "    int aux[v0 > 0 ? v0 : 1];\n";
+        out << "    for (int k_ = 0; k_ < v0; k_++) aux[k_] = 0;\n";
+    }
+    bool returned = em.stmt(program, 1);
+    if (!returned && abi.returnsValue) out << "    return " << em.arrName << "[0];\n";
+    out << "}\n";
+    return out.str();
+}
+
+std::vector<int> abiResult(const CFunctionAbi& abi, const std::vector<int>& finalArray) {
+    if (abi.returnsValue) {
+        if (finalArray.empty()) return {};
+        return {finalArray[0]};
+    }
+    return finalArray;
+}
+
+}  // namespace algosearch

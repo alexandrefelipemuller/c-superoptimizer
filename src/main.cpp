@@ -9,6 +9,7 @@
 #include <thread>
 #include <unordered_map>
 
+#include "superopt/CImportTool.hpp"
 #include "problems/AverageProblem.hpp"
 #include "problems/ContainsAscendingProblem.hpp"
 #include "problems/ContainsOrderedProblem.hpp"
@@ -1292,6 +1293,7 @@ void runFillBsearchHoleMode(const CliArgs& args) {
 }
 
 int main(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "c-import") == 0) return runCImportTool(argc - 1, argv + 1);
     CliArgs args;
     if (!parseArgs(argc, argv, args)) {
         printUsage();

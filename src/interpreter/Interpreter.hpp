@@ -57,7 +57,16 @@ public:
         traceFn_ = std::move(onVisit);
     }
 
+    // C semantics under `gcc -fwrapv` for 32-bit int (the superoptimizer
+    // prototype's model, see docs/superopt.md): an overflowing multiply wraps
+    // instead of being a runtime error. Add/Sub always wrap. Division by
+    // zero, INT_MIN / -1 and out-of-range shifts stay runtime errors in both
+    // modes (they trap or are undefined in C even with -fwrapv). Off by
+    // default: every search reproduces prior behavior exactly.
+    void setWrapArithmetic(bool on) { wrapArithmetic_ = on; }
+
 private:
+    bool wrapArithmetic_ = false;
     const Stmt* traceSite_ = nullptr;
     std::function<void(const std::vector<int>&, const std::vector<int>&)> traceFn_;
     long stepLimit_;

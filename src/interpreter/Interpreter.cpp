@@ -39,6 +39,9 @@ struct Environment {
     const Stmt* root = nullptr;
     long recursionDepth = 0;
     long maxRecursionDepth = 0;
+    // Interpreter::setWrapArithmetic: a multiply that overflows int wraps
+    // (two's complement) instead of being a runtime error.
+    bool wrapArithmetic = false;
     // Interpreter::setConditionTrace; null when unused.
     const Stmt* traceSite = nullptr;
     const std::function<void(const std::vector<int>&, const std::vector<int>&)>* traceFn = nullptr;
@@ -107,8 +110,12 @@ int evalExpr(const Expr& e, Environment& env) {
             int b = evalExpr(*e.rhs, env);
             if (aborted(env)) return 0;
             switch (e.kind) {
-                case ExprKind::Add: return a + b;
-                case ExprKind::Sub: return a - b;
+                // Two's-complement wraparound, computed in unsigned so an
+                // overflow is defined behavior. Same values the plain signed
+                // `a + b` produced on every platform this runs on, minus the
+                // undefined behavior the compiler was free to exploit.
+                case ExprKind::Add: return static_cast<int>(static_cast<unsigned>(a) + static_cast<unsigned>(b));
+                case ExprKind::Sub: return static_cast<int>(static_cast<unsigned>(a) - static_cast<unsigned>(b));
                 case ExprKind::Lt: return a < b ? 1 : 0;
                 case ExprKind::Gt: return a > b ? 1 : 0;
                 case ExprKind::Le: return a <= b ? 1 : 0;
@@ -123,6 +130,7 @@ int evalExpr(const Expr& e, Environment& env) {
                     // out-of-bounds array access -- a generated candidate
                     // that overflows just scores as broken, nothing crashes.
                     long long wide = static_cast<long long>(a) * static_cast<long long>(b);
+                    if (env.wrapArithmetic) return static_cast<int>(static_cast<unsigned>(wide));
                     if (wide < std::numeric_limits<int>::min() || wide > std::numeric_limits<int>::max()) {
                         env.flow = Flow::Error;
                         return 0;
@@ -321,6 +329,7 @@ RunStatus Interpreter::run(const Stmt& program, const std::vector<int>& input, i
     env.root = &program;
     env.recursionDepth = 0;
     env.maxRecursionDepth = maxRecursionDepth_;
+    env.wrapArithmetic = wrapArithmetic_;
     env.traceSite = traceFn_ ? traceSite_ : nullptr;
     env.traceFn = &traceFn_;
     if (seedRecursionBounds_ && numVars > 2) {

@@ -46,7 +46,7 @@ pointers to the raw data backing each claim.
 
 ```sh
 make            # builds ./algosearch
-make test       # builds and runs ./algosearch_tests (274 unit/integration tests)
+make test       # builds and runs ./algosearch_tests (285 unit/integration tests)
 ```
 
 ## Running a search
@@ -60,6 +60,19 @@ Run `./algosearch --help` for the full flag list (search width/depth,
 diversity/crossover/niching knobs, grammar-bias knobs, etc. — all of them
 are either "confirmed default" or "opt-in, mixed evidence" per
 `FINDINGS.md`).
+
+## Importing C (superoptimizer prototype)
+
+```sh
+./algosearch c-import tests/c_samples/popcount_loop.c          # C -> Mini-C
+./algosearch c-import tests/c_samples/popcount_loop.c --emit   # Mini-C -> C
+scripts/c_roundtrip.py tests/c_samples/*.c                     # interpreter = original C = regenerated C
+```
+
+A subset of C (`int` scalars, one `int *a, int n` array) is translated into
+Mini-C and back, as the first step towards using the search as a source-level
+superoptimizer. Semantics, ABI, supported subset and the plan are in
+`docs/superopt.md`; it is not connected to the search yet.
 
 ## Results
 
