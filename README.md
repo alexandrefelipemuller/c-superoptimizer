@@ -46,7 +46,7 @@ pointers to the raw data backing each claim.
 
 ```sh
 make            # builds ./algosearch
-make test       # builds and runs ./algosearch_tests (58 unit/integration tests)
+make test       # builds and runs ./algosearch_tests (274 unit/integration tests)
 ```
 
 ## Running a search
@@ -61,93 +61,59 @@ diversity/crossover/niching knobs, grammar-bias knobs, etc. — all of them
 are either "confirmed default" or "opt-in, mixed evidence" per
 `FINDINGS.md`).
 
-## Results: all 17 problems, one modest-budget sweep
+## Results
 
-The table below is from a single sweep (2026-10-03, `data/modest_battery_combinator_default_20261003/`)
-across every problem this project currently supports, at the **same modest
-search budget** for each (`--beam-width 500 --candidates 1500
---max-program-size 150 --benchmark-seeds 5`, current grammar defaults --
-`loopAccumulatorBias=0.4`, native `Le`/`Ge`/`Ne`, native `Mul`/`Div`/`Mod`/
-bitwise, the skeleton library from `FINDINGS.md` sections 11-17 (minus the
-`counting` and `divideconquer` skeletons, removed in section 57 after an
-isolation battery showed nothing needs them; and, since section 100,
-minus `recurrence`, `repeatedmultiply`, `nesteddivisor` and
-`nesteddivisornative`, replaced by the generic scalar-loop piece below,
-and since section 101 minus `average`), and the combinator algebra on
-by default, `--combinator-bias 0.5`, since section 48). The table predates
-the stateful combinator pieces (Kadane, LIS, rain water and relatives),
-on by default since section 62. With them, ten more array problems are
-solved 10/10 (section 61); `--no-combinator-state` reproduces the table. The nested aggregates and
-absolute step (default since section 72) add six more: max_adjacent_gap,
-max_profit, count_leaders, has_majority, count_dominated and count_unique
-(section 71); `--no-combinator-nested` turns them off. The frequency-table piece
-(default since section 76) adds elements_twice and min_frequency and takes
-count_unique to 10/10 (section 75); `--no-combinator-frequency` turns it off. Pointer-following blocks,
-drawn only when every input value is a valid index (default since section 79),
-solve cycle, walk_length and visits_zero (sections 77-79);
-`--no-follow-pointer-inputs` turns them off. Orthogonal modifiers (difference
-direction and |.| on every step relation, default since section 81) solve
-max_drawdown, total_variation and largest_drop_step (section 80);
-`--no-combinator-orthogonal` turns them off. Arg-best (return where the best
-is, default since section 85) solves mode, least_frequent_value and
-argmax_index (section 82); `--no-combinator-argbest` turns it off. Distinct counting (default
-since section 88) solves values_twice, repeated_values, rare_values and
-frequent_values (section 87); `--no-combinator-distinct` turns it off. Every level's scoring set
-also holds the first 12 instances of each earlier level (`--regression-guard
-12`, default since section 89), so a champion can no longer break smaller
-n unnoticed; `--regression-guard 0` turns it off. Two more pointer relations
-(trailing node, loop length; default since section 90) solve last_node and
-cycle_length; `--no-follow-extended` turns them off.
-Every row is a solution that survived `--benchmark`'s independent adversarial
-re-check, not just the training score. "Time to generate" is the search
-wall-clock time per seed (mean across the 5 benchmark seeds) on an 8-core
-machine -- how long it took to *find* the solution, not how fast the
-discovered algorithm runs. The previous sweep (2026-09-17, combinator off,
-`data/modest_battery_20260917_1518/`) is reproducible with
-`--combinator-bias 0`; the main changes are `reverse` (O(n²), ~16s -> O(n),
-~0.2s) and `graph_reachability` (5 rejections -> 0).
+All numbers are from the current defaults (see `FINDINGS.md`, section 2),
+`--beam-width 500 --candidates 1500 --max-program-size 150 --step-limit
+20000`, 180 s per run (240 s where `--num-vars` is set), `--benchmark
+--benchmark-seeds 1`. A run counts as solved only if a program survives the
+independent re-check (held-out sizes, adversarial and exhaustive inputs,
+magnitude shift), not just the training score.
 
-| Problem | Result | Complexity | Time to generate (avg/seed) |
-|---|---|---|---|
-| `sorting` | 5 solutions confirmed | O(n²) | ~0.06s |
-| `min` | 4 solutions confirmed | O(n) | ~0.02s |
-| `max` | 5 solutions confirmed | O(n) | ~0.02s |
-| `sum` | 5 solutions confirmed | O(n) | ~0.02s |
-| `contains` | 5 solutions confirmed | O(n) | ~0.02s |
-| `contains_ordered` | 5 solutions confirmed | O(n) | ~0.03s |
-| `is_prime` | 4 solutions confirmed | **O(√n)** | ~0.02s |
-| `gcd` | 4 solutions confirmed (native-mod Euclidean) | **O(1)** | ~0.04s |
-| `factorial` | 5 solutions confirmed | O(n²) | ~25.7s |
-| `fibonacci` | 5 solutions confirmed | O(n) | ~0.02s |
-| `count` | 5 solutions confirmed | O(n) | ~0.06s |
-| `average` | 5 solutions confirmed | O(n) | ~0.02s |
-| `reverse` | 5 solutions confirmed (two converging pointers) | **O(n)** | ~0.17s |
-| `power` | 5 solutions confirmed | O(n) | ~0.02s |
-| `three_sum` | 5 solutions confirmed | O(n²)\* | ~0.24s |
-| `single_number` | 5 solutions confirmed (XOR reduce) | O(n) | ~0.02s |
-| `graph_reachability` | 3 solutions confirmed, 0 rejected | O(n^1.5) | ~0.18s |
+| benchmark | solved | source |
+|---|---|---|
+| 77-problem suite, 10 seeds each | **759 / 770** | `data/prefix_joint_battery_20261111` (base arm), section 178b |
+| PSB2 integer subset (7 problems), 100 seeds, 900 s | 595 / 700 | sections 139-145 |
+| external held-out set (3 problems from a public "easy array" list) | 4 / 30 with the defaults of the time; with `--local-cond-mutation` (now default) peak_element 15/30; search_rotated and equilibrium_point 10/10 only with the opt-in `--first-index --prefix-split`, built after diagnosing them | sections 114-117b |
+| unseen PSB2 / PSB1-style problems (17), pieces on vs off | no difference beyond noise | sections 132-135 |
+| learning curve on fresh problems (3 batches of 10, library frozen per batch) | 3, 6, 3 of 10 solved | sections 149-151 |
 
-\* the algorithm is a genuine triple-nested O(n³) loop; the curve fit's
-exponent (~2.1, r²=0.91-0.92) is measured over a small `n` range (max-n=8)
-where constant-factor effects still dominate the fit -- see the O(n log n)
-heapsort caveat below for the same "not a pure power law over a bounded
-range" nuance.
+The suite overstates how far the system generalizes: it was written alongside
+the pieces that solve it. On problems chosen from outside, most of what is
+solved is what a piece was designed for.
+
+### The classic problems, latest run
+
+Solved out of 10 seeds, and the complexity `--benchmark` fits to the fastest
+verified program (the most frequent fit across seeds). "Actual" is the
+complexity of the algorithm found, read from the program, where the fit is
+misleading.
+
+| problem | solved | fitted | actual | note |
+|---|---|---|---|---|
+| `sorting` | 10 | O(n²) | O(n²) | selection/exchange sort; heap, merge and quick sort only with skeletons or the opt-in sorting moves |
+| `min`, `max`, `sum`, `count`, `average` | 10 each | O(n) | O(n) | `min`/`max` also fit O(n²) in 3-4 seeds (a redundant inner loop) |
+| `contains`, `contains_ordered` | 10 each | O(n) | O(n) | linear scan |
+| `reverse` | 10 | O(n) | O(n) | two converging pointers |
+| `single_number` | 10 | O(n) | O(n) | XOR reduce |
+| `fibonacci`, `power` | 10 each | O(n) | O(n) | |
+| `is_prime` | 10 | O(n) in 8, O(√n) in 2 | same | the default search now usually stops trial division at n, not √n |
+| `gcd` | 10 | O(1) | **O(log n)** | Euclid with native `%`; the benchmark instance is gcd(n, 1), which ends after one step, so the fit cannot see the logarithm |
+| `factorial` | 10 | O(1) | O(n) | the domain is n ≤ 12 (32-bit overflow), too narrow for a fit |
+| `three_sum` | 7 | O(n²) | O(n³) | triple loop, fitted on n ≤ 8 |
+| `graph_reachability` | 10 | O(n^1.5) | O(V³) | V rounds of matrix relaxation; n counts matrix cells |
+| `lis`, `substring`, `cycle` | 10 each | O(n²), O(n²), O(n) | same | the old held-out rulers, now solved by generic pieces |
+
+Per-problem results for all 77 problems: `python3 scripts/tally_battery.py
+data/prefix_joint_battery_20261111`. Below 10/10 there are only
+`majority_value` (3), `three_sum` (7) and `least_frequent_value` (9).
 
 Results worth calling out:
 
-- **`gcd` now reaches genuine O(1), and `is_prime` genuine O(√n) --
-  the "language ceiling" from `FINDINGS.md` section 13 is broken.**
-  Section 13 found that a smarter loop bound (mod-based GCD, sqrt-bound
-  primality) never paid off, because each candidate's own check was
-  still built from repeated subtraction (O(a/b) or O(x/d) per check),
-  so total work stayed linear regardless of how few candidates the outer
-  loop considered. `FINDINGS.md` section 17 added native `Mul`/`Div`/`Mod`
-  to Mini-C, and the free search converges onto the native-mod variant of
-  both problems in every seed tested, confirmed by hand-timed A/B
-  (`gcd(n,1)`: exponent 0.99 -> ~0.00 across a 100x range; `is_prime` on
-  large primes: 10,544x faster at the larger test point) and now by
-  `--benchmark`'s own curve fit, shown in the table above.
-  `gcd`'s solution:
+- **Native arithmetic broke the complexity ceiling** (`FINDINGS.md` sections
+  13, 17): before `Mul`/`Div`/`Mod`, every gcd and primality check was built
+  from repeated subtraction, so work stayed linear. With native `%` the search
+  finds Euclid's algorithm in every seed:
   ```
   v1 = arr[0]; v2 = arr[1];
   while (v2 != 0) {
@@ -157,101 +123,28 @@ Results worth calling out:
   }
   arr[0] = v1;
   ```
-- **`sorting` CAN reach O(n log n)** — a from-scratch heapsort skeleton
-  (`FINDINGS.md` section 14) measures a genuinely different complexity
-  signature (exponent 1.13-1.26) from the selection-sort/bubble shape
-  the free search always converges on instead (exponent 1.90-2.00, what
-  shows in the table above). The free search never picks the bigger
-  heapsort AST over the smaller quadratic one on its own — reaching it
-  currently needs the research-only `ALGOSEARCH_FORCE_SKELETON=heapsort`
-  override, not the default `--benchmark` run.
-- **`three_sum`, `single_number`, `graph_reachability` are new**
-  (`FINDINGS.md` sections 15-17), added to test coverage against
-  algorithm families the original problem set didn't touch at all:
-  relating three array elements, bit manipulation, and graphs. Two very
-  different stories: `single_number` (LeetCode's classic XOR trick) was
-  nearly free — one new accumulator variant reusing existing
-  infrastructure, solved by the free search in ~0.03s. `three_sum` and
-  `graph_reachability` needed dedicated skeletons the free grammar had no
-  chance of stumbling into on its own (3SUM: confirmed by a 65-minute,
-  10x-budget run finding zero genuinely generalizing solutions before the
-  skeleton was added; graph reachability needed the native-multiply
-  extension just to make the adjacency-matrix indexing *representable* at
-  all, plus a real bug fix in `Benchmark.cpp`'s magnitude-shift check,
-  which was corrupting the vertex-count/edge-flag metadata it was
-  shifting). Since section 103 `three_sum` no longer needs its skeleton:
-  a generic triple-aggregate combinator piece (`--combinator-triple`,
-  default; Exists/CountIf/Forall of an arithmetic predicate over all
-  i < j < k) finds it at the same rate.
-  Since section 104 `graph_reachability` no longer needs its skeleton
-  either: a generic matrix-relaxation piece (`--combinator-relax`,
-  default; V rounds of `if guard(S[i]) && edge(M[i][j]) update S[j]`,
-  each part drawn independently) finds it at 28-29/30 against 30/30.
-  Since section 105 the `shortestpath` skeleton is gone too (it never
-  emitted -1 for unreachable targets; the relax piece does), and since
-  section 109 `dtw` is found by a grid-DP piece (`--combinator-grid`,
-  default; boundary, cell cost and recurrence drawn independently) at
-  30/30 without its skeleton. Since section 111 sums can transform their
-  term (`--combinator-transform`, default: max(0, step) on step sums,
-  elem(i) - elem(0) under id/|.|/max(0,.) on element sums), which solves
-  the old rulers `sum_of_rises` and `sum_abs_from_first` 10/10 (from 0);
-  since section 112d DistinctCount also sums, takes the max of, or
-  parity-filters the selected values (`--distinct-aggregate`, default),
-  which solves `sum_distinct` and `odd_frequency_values` 10/10 (from 0);
-  since section 113 RunBest can return the value at the best run and
-  FrequencyTable's arg pass can fall back to -1 under a frequency test
-  (`--arg-sentinel`, default): `longest_run_value` 0 -> 10/10,
-  `majority_value` 0 -> 1-2/10 (the exact guard is a rare draw);
-  since section 115b the search also takes local steps on an if's
-  comparison (`--local-cond-mutation 0.3`, default: comparator swap or
-  one operand to a neighbour), 44 vs 21 of 150 runs on five near-miss
-  problems including three from an external list (section 114);
-  the `tsp` verification is capped at V <= 9 (sections 107b-107d). In the 2026-09-17 sweep `graph_reachability` also had a lower
-  confirmation rate (1 of 6 SUCCESS candidates survived independent
-  re-verification); in the current sweep 3 of 3 survive. See section 17
-  for the standalone correctness verification (8/8 hand-built test graphs)
-  done before ever trusting the search on it.
-- **The combinator algebra is on by default** (`FINDINGS.md` sections
-  38-48): blocks drawn as a product of input layout x loop shape x
-  relation, instead of whole hand-written algorithms. Against the previous
-  default (section 47, 15 matched seeds per problem) it loses nothing on
-  the 17 problems above, and takes eight newer array problems
-  (`substring`, `palindrome`, `inversion_count`, `has_duplicate`,
-  `is_sorted`, `count_descents`, `strictly_increasing`,
-  `has_adjacent_equal`) from 0-4/15 to 15/15. With every sort skeleton
-  disabled it still sorts, by algorithms no skeleton contains: Fung's "I
-  can't believe it can sort", exchange sort, and occasionally gnome and
-  bubble sort (section 46).
-- **`factorial`**'s remaining "failures" at its hardest training level
-  aren't a search failure: `factorial(27)` overflows a 32-bit `int`, so
-  the discovered algorithm is actually correct, just bounded by the
-  interpreter's integer type.
-- **`count`/`average`/`power`** (added to isolate compositional
-  primitives the original ten didn't exercise: a counter gated by a
-  condition, a division-via-subtraction skeleton, and a
-  constant-multiplicand nested multiply as opposed to factorial's
-  increasing-multiplicand one) all plateaued at first, diagnosed the
-  same way as `gcd`'s original `Sub(Var,Var)`/`!=` gaps and fixed the
-  same way (one dedicated skeleton per shape) — see `FINDINGS.md`
-  section 10. Since section 100 those scalar skeletons are gone: one
-  generic scalar-loop piece (`--scalar-loop`, default; independent init,
-  counted or until-zero loop, fold / pair / divisor-test body, optional
-  divide) finds gcd, fibonacci, factorial, power and is_prime at 30/30
-  seeds without them. Along the way factorial and power got an exact
-  64-bit reference with overflow out of domain (n <= 12 for factorial),
-  because native `Mul` errors on overflow instead of wrapping. Since
-  section 101 the piece's `arr[i]` fold walks `i = 0 .. N-1`
-  (`--scalar-loop-index-range`, default), which also finds `average`, so
-  the `average` skeleton is gone too.
+  It runs in O(log min(a, b)) steps (Lamé). A hand-timed A/B on gcd(n, 1)
+  showed the exponent drop from 0.99 (subtraction) to ~0; that instance is the
+  best case for Euclid, which is why the table shows O(1).
+- **Skeletons were replaced by generic pieces** (sections 56-58, 99-117): of 15
+  hand-written skeletons, 6 remain (`selectionsort`, `heapsort`,
+  `binarysearch`, `mergesort`, `tspbruteforce`, `tspbranchandbound`), each the
+  only route to its algorithm family. The rest were replaced by combinator
+  pieces (scalar loop, triple aggregate, matrix relaxation, grid DP and others)
+  that find the same problems at the same rate.
+- **Sorting reaches five families only with opt-in moves** (sections 157-183):
+  the default finds exchange/selection sort. Opt-in moves (`--adjacent-nested`,
+  `--partition`, `--range-shell`, `--merge-shell`, `--prefix-combinator`) reach
+  insertion, quick and merge sort, but cost 2-14 of 759 on the suite, so they
+  stay a sorting profile, not a default.
+- **`factorial`**'s training failures above n = 12 are 32-bit overflow, not
+  search failures; the reference uses 64-bit arithmetic and treats overflow as
+  out of domain.
 
-See `FINDINGS.md` for the full experimental history (grammar bias sweeps,
-diversity/crossover/niching A/B tests, the native-comparison-operator
-change, the cross-skeleton study, the complexity-ceiling investigation and
-how it was later broken, heapsort, 3SUM, and the honest negative results
-along the way) and `scripts/run_full_battery_modest.sh` to reproduce this
-sweep.
+See `FINDINGS.md` for the decisions behind each default, the closed negatives,
+and pointers into `docs/findings/` for every number above.
 
-## Held-out discovery benchmark (in progress)
+## Held-out discovery benchmark (history)
 
 Three problems deliberately **not** in the skeleton library now exist as the
 ruler for open-ended discovery work: `lis`, `substring`, and `cycle`
@@ -272,8 +165,8 @@ the target `substring` shape (champions contain the correct `n-m+1` bound
 and alignment indices) but never converges to the clean version -- 0/15
 generalizing in Test A, with `lis` (Test B) and `cycle` (reserve) out of
 reach by construction, as designed.
-See `FINDINGS.md` sections 25-27 for the protocol, the five-column taxonomy,
-and the next steps.
+See `FINDINGS.md` sections 25-27 for the protocol and the five-column taxonomy.
+All three rulers are solved 10/10 by the current defaults (table above).
 
 Generation-time pruning (`--prune-generation`, opt-in, off by default and
 byte-identical to the unpruned grammar when off) redraws text-level trivia at
