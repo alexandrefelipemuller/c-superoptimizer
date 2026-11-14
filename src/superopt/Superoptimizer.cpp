@@ -47,10 +47,17 @@ const ExprKind binaryKinds[] = {ExprKind::Add,    ExprKind::Sub,   ExprKind::Mul
                                 ExprKind::Le,     ExprKind::Ge,    ExprKind::Eq,     ExprKind::Ne};
 const int constants[] = {0, 1, 2, -1, 3, 4, 8, 16, 31, 32};
 
+bool isComparison(ExprKind k) {
+    return k == ExprKind::Lt || k == ExprKind::Gt || k == ExprKind::Le || k == ExprKind::Ge || k == ExprKind::Eq ||
+           k == ExprKind::Ne;
+}
+
 struct Mutator {
     Random rng;
     int numVars;
     int arity;
+    bool algorithmic = false;  // phase 3c moves (log 190)
+    bool returnsValue = true;
 
     template <class T>
     T& pick(std::vector<T>& v) {
@@ -73,10 +80,126 @@ struct Mutator {
 
     StmtPtr assign() { return makeAssign(rng.uniformInt(1, std::max(1, numVars - 1)), expr(2)); }
 
+    // Statement sites of a given kind: (list, index).
+    std::vector<std::pair<std::vector<StmtPtr>*, size_t>> sites(const Slots& s, StmtKind kind) {
+        std::vector<std::pair<std::vector<StmtPtr>*, size_t>> out;
+        for (auto* l : s.lists)
+            for (size_t i = 0; i < l->size(); ++i)
+                if ((*l)[i]->kind == kind) out.push_back({l, i});
+        return out;
+    }
+
+    ExprPtr condition() {
+        static const ExprKind cmp[] = {ExprKind::Lt, ExprKind::Gt, ExprKind::Le, ExprKind::Ge, ExprKind::Eq,
+                                       ExprKind::Ne};
+        return makeBinOp(cmp[rng.uniformInt(0, 5)], expr(1), expr(1));
+    }
+
+    // Phase 3c (log 190): edits that change the algorithm's shape rather
+    // than one node. Unrolling is exact; the others are checked by the tests
+    // like any mutant.
+    bool algorithmicOnce(Slots& s, int which = -1) {
+        switch (which >= 0 ? which : rng.uniformInt(0, 4)) {
+            case 0: {  // unroll a loop twice: while (c) { B; if (!c) break; B }
+                auto w = sites(s, StmtKind::While);
+                if (w.empty()) return false;
+                auto [l, i] = w[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(w.size()) - 1))];
+                Stmt& loop = *(*l)[i];
+                std::vector<StmtPtr> copy;
+                for (const auto& b : loop.body) copy.push_back(b->clone());
+                std::vector<StmtPtr> brk;
+                brk.push_back(makeBreak());
+                loop.body.push_back(
+                    makeIf(makeBinOp(ExprKind::Eq, loop.cond->clone(), makeIntConst(0)), std::move(brk)));
+                for (auto& b : copy) loop.body.push_back(std::move(b));
+                return true;
+            }
+            case 1: {  // if (c) v = a; [else v = b;]  ->  v = b ^ ((a ^ b) & -c)
+                std::vector<std::pair<std::vector<StmtPtr>*, size_t>> ok;
+                for (auto [l, i] : sites(s, StmtKind::If)) {
+                    const Stmt& st = *(*l)[i];
+                    if (st.body.size() != 1 || st.body[0]->kind != StmtKind::Assign) continue;
+                    if (st.elseBody.size() > 1) continue;
+                    if (st.elseBody.size() == 1 && (st.elseBody[0]->kind != StmtKind::Assign ||
+                                                    st.elseBody[0]->varIndex != st.body[0]->varIndex))
+                        continue;
+                    ok.push_back({l, i});
+                }
+                if (ok.empty()) return false;
+                auto [l, i] = ok[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(ok.size()) - 1))];
+                Stmt& st = *(*l)[i];
+                int v = st.body[0]->varIndex;
+                ExprPtr t = isComparison(st.cond->kind)
+                                ? st.cond->clone()
+                                : makeBinOp(ExprKind::Ne, st.cond->clone(), makeIntConst(0));
+                ExprPtr mask = makeBinOp(ExprKind::Sub, makeIntConst(0), std::move(t));
+                ExprPtr a = st.body[0]->valueExpr->clone();
+                ExprPtr b = st.elseBody.empty() ? makeVar(v) : st.elseBody[0]->valueExpr->clone();
+                ExprPtr bb = b->clone();
+                ExprPtr sel = makeBinOp(
+                    ExprKind::BitXor, std::move(b),
+                    makeBinOp(ExprKind::BitAnd, makeBinOp(ExprKind::BitXor, std::move(a), std::move(bb)), std::move(mask)));
+                (*l)[i] = makeAssign(v, std::move(sel));
+                return true;
+            }
+            case 2: {  // insert an early exit: `if (c) break;` in a loop, or `if (c) return E;`
+                auto loops = sites(s, StmtKind::While);
+                std::vector<StmtPtr> body;
+                std::vector<StmtPtr>* target = nullptr;
+                if (!loops.empty() && rng.chance(0.5)) {
+                    auto [l, i] = loops[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(loops.size()) - 1))];
+                    target = &(*l)[i]->body;
+                    body.push_back(makeBreak());
+                } else {
+                    target = pick(s.lists);
+                    if (returnsValue) body.push_back(makeAssignArray(makeIntConst(0), expr(1)));
+                    body.push_back(makeReturn());
+                }
+                target->insert(target->begin() + rng.uniformInt(0, static_cast<int>(target->size())),
+                               makeIf(condition(), std::move(body)));
+                return true;
+            }
+            case 3: {  // a loop that runs at most once: while (c) B -> if (c) B
+                auto w = sites(s, StmtKind::While);
+                if (w.empty()) return false;
+                auto [l, i] = w[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(w.size()) - 1))];
+                StmtPtr loop = std::move((*l)[i]);
+                (*l)[i] = makeIf(std::move(loop->cond), std::move(loop->body));
+                return true;
+            }
+            default: {  // strength reduction by a power of two: * -> <<, / -> >>, % -> &
+                std::vector<ExprPtr*> red;
+                for (auto* e : s.exprs) {
+                    const Expr& x = **e;
+                    if ((x.kind == ExprKind::Mul || x.kind == ExprKind::Div || x.kind == ExprKind::Mod) &&
+                        x.rhs->kind == ExprKind::IntConst && x.rhs->intValue > 1 &&
+                        (x.rhs->intValue & (x.rhs->intValue - 1)) == 0)
+                        red.push_back(e);
+                }
+                if (red.empty()) return false;
+                Expr& x = **pick(red);
+                int k = x.rhs->intValue, p = 0;
+                while ((1 << p) < k) ++p;
+                if (x.kind == ExprKind::Mul) {
+                    x.kind = ExprKind::Shl;
+                    x.rhs->intValue = p;
+                } else if (x.kind == ExprKind::Div) {
+                    x.kind = ExprKind::Shr;
+                    x.rhs->intValue = p;
+                } else {
+                    x.kind = ExprKind::BitAnd;
+                    x.rhs->intValue = k - 1;
+                }
+                return true;
+            }
+        }
+    }
+
     // Applies one edit; false when the chosen edit had nothing to act on.
     bool once(Stmt& root) {
         Slots s;
         collect(root, s);
+        if (algorithmic && rng.chance(0.25)) return algorithmicOnce(s);
         std::vector<std::vector<StmtPtr>*> nonEmpty;
         for (auto* l : s.lists)
             if (!l->empty()) nonEmpty.push_back(l);
@@ -204,14 +327,25 @@ struct Timed {
 
 }  // namespace
 
-Program mutateForSuperopt(const Stmt& program, int numVars, int arity, uint64_t seed) {
-    Mutator m{Random(seed), numVars, arity};
+Program mutateForSuperopt(const Stmt& program, int numVars, int arity, uint64_t seed, bool algorithmic,
+                          bool returnsValue) {
+    Mutator m{Random(seed), numVars, arity, algorithmic, returnsValue};
     Program p = program.clone();
     int edits = 1;
     while (edits < 4 && m.rng.chance(0.35)) ++edits;
     for (int i = 0; i < edits; ++i)
         for (int tries = 0; tries < 8 && !m.once(*p); ++tries) {
         }
+    return p;
+}
+
+Program applyAlgorithmicMove(const Stmt& program, int move, int numVars, int arity, uint64_t seed,
+                             bool returnsValue) {
+    Mutator m{Random(seed), numVars, arity, true, returnsValue};
+    Program p = program.clone();
+    Slots s;
+    collect(*p, s);
+    if (!m.algorithmicOnce(s, move)) return nullptr;
     return p;
 }
 
@@ -359,7 +493,24 @@ SuperoptResult Superoptimizer::run() {
         }
     };
     if (config_.timeTopK > 0) {
-        timer = std::make_unique<CompiledTimer>(config_.originalSource, abi, workload_, config_.workDir);
+        // Section 190: the compiled workload is its own, larger set. With the 24
+        // cost inputs repeated, the branch predictor memorizes their branches and
+        // a branchy candidate times faster than it runs on fresh data.
+        std::vector<std::vector<int>> timing;
+        Random trng(config_.seed ^ 0x2545f4914f6cdd1dULL);
+        bool scalarAbi = abi.kind == CFunctionAbi::Kind::Scalars;
+        for (int tries = 0; timing.size() < static_cast<size_t>(config_.timingInputs) && tries < 20 * config_.timingInputs;
+             ++tries) {
+            std::vector<int> in;
+            if (scalarAbi) {
+                in = randomInput(trng, abi, 0);
+            } else {
+                in.resize(static_cast<size_t>(trng.uniformInt(16, 64)));
+                for (auto& x : in) x = trng.uniformInt(-50, 50);
+            }
+            if (problem_.expected(in)) timing.push_back(std::move(in));
+        }
+        timer = std::make_unique<CompiledTimer>(config_.originalSource, abi, timing, config_.workDir);
         double spread = 0;
         std::vector<double> self;
         for (int i = 0; i < 3; ++i) {
@@ -436,7 +587,8 @@ SuperoptResult Superoptimizer::run() {
         for (const Candidate* parent : parents) {
             for (int m = 0; m < config_.mutantsPerParent; ++m) {
                 Candidate c;
-                c.program = mutateForSuperopt(*parent->program, numVars, arity, rng.engine()());
+                c.program = mutateForSuperopt(*parent->program, numVars, arity, rng.engine()(),
+                                              config_.algorithmicMoves, abi.returnsValue);
                 c.fromTimed = parent->fromTimed;
                 c.size = c.program->size();
                 if (c.size > maxSize) continue;

@@ -326,3 +326,7 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 188b. (results) 45/45 equivalent; one gain (is_pow2 1.15-1.34x); model vs measured Spearman 0.12 | 11_sections_121-125.md | 2135 |
 | 189. (registered) Phase 3b: compiled timing of candidates inside the superopt loop (--time-top) | 11_sections_121-125.md | 2149 |
 | 189. (results) No regressions, 45/45 equivalent; is_pow2 1.2x and sign 1.64x (a gain the model cannot see) | 11_sections_121-125.md | 2156 |
+| 190. (registered) Phase 3c: algorithmic moves (unroll, branch-free select, early exit, loop→if, strength reduction) A/B | 11_sections_121-125.md | 2170 |
+| 190. (results) ON 7 gains vs 3, but 2 regressions: the 24-input in-loop timer let branches be memorized | 11_sections_121-125.md | 2180 |
+| 190b. (registered) A/B rerun with a 512-input compiled timer | 11_sections_121-125.md | 2189 |
+| 190b. (results) ON 7 vs OFF 4, no candidate regresses; algorithmic moves become the superopt default | 11_sections_121-125.md | 2195 |

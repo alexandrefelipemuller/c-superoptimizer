@@ -17,7 +17,7 @@ Interface gaps (planned 2026-11-13), and their status:
 | 2 | `ReferenceProblem`: the original function is the oracle | done (log 187) |
 | 3 | cost model; search from the reference, objective cost given correctness; compiled speedup measurement | done (log 188-188b): one real gain; the uncalibrated model does not predict compiled time |
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
-| 3c | reach: algorithmic moves (loop unrolling, strength reduction, branch-free templates), larger functions | next |
+| 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs |
 | 4 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | |
 | 5 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -157,6 +157,31 @@ up to 1.5x (log 188b).
   is the fastest one above the noise threshold, or the reference itself
   ("no measured gain"), never a program the model likes and the machine does
   not.
+
+### Algorithmic moves (phase 3c)
+
+The algorithmic moves (default since log 190b; `--no-algorithmic-moves` turns them off) turn a quarter of the edits into moves that change the
+shape of the algorithm rather than one node:
+
+- unroll a loop twice: `while (c) { B; if (!c) break; B }` (exact);
+- `if (c) v = a; [else v = b;]` becomes the branch-free select
+  `v = b ^ ((a ^ b) & (0 - c))`;
+- insert an early exit: `if (c) break;` in a loop, or `if (c) return E;`;
+- a loop becomes an `if` (one iteration);
+- strength reduction by powers of two (`*` to `<<`, `/` to `>>`, `%` to `&`),
+  valid only for non-negative operands, which the tests decide.
+
+Without the flag, the edits and the random stream are exactly those of phase
+3. `tests/c_samples_set2/` holds 8 larger samples with known better forms
+(max_index, sum_abs, count_positive, popcount_naive, reverse_bits8,
+count_digits, clamp, mul_by_add). gcc already turns `mul_by_add`'s loop into a
+multiply, and `clamp` is below timing resolution.
+
+The in-loop timer runs on its own 512 fresh inputs (`timingInputs`), the size
+and distribution of the external measurement. In log 190 it reused the 24
+cost-model inputs. Repeated, their branches were memorized by the branch
+predictor, and two branchy candidates timed as 1.24x and 1.42x in the loop
+but ran at 0.34x and 0.92x on fresh data.
 
 `scripts/c_speedup.py ORIGINAL.c FOUND.c` measures what counts: both compiled
 with gcc -O2 -fwrapv in separate translation units, called through a volatile

@@ -150,6 +150,8 @@ int runSuperoptTool(int argc, char** argv) {
         else if (a == "--out") outPath = next();
         else if (a == "--verbose") cfg.verbose = true;
         else if (a == "--time-top") cfg.timeTopK = std::stoi(next());
+        else if (a == "--algorithmic-moves") cfg.algorithmicMoves = true;
+        else if (a == "--no-algorithmic-moves") cfg.algorithmicMoves = false;
         else if (a == "--work-dir") cfg.workDir = next();
         else if (file.empty() && !a.empty() && a[0] != '-') file = a;
         else {
@@ -160,7 +162,7 @@ int runSuperoptTool(int argc, char** argv) {
     }
     if (file.empty()) {
         std::cerr << "usage: algosearch superopt FILE.c [--func NAME] [--seconds 30] [--beam 40] [--mutants 12] "
-                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR]\n";
+                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves]\n";
         return 1;
     }
     try {

@@ -4,25 +4,28 @@
 # against the compiled original and measure its compiled speedup.
 #   scripts/run_superopt_battery.sh OUTDIR [SEEDS] [SECONDS] [JOBS]
 set -u
-OUT=${1:?outdir}; SEEDS=${2:-"1 2 3"}; SECS=${3:-60}; JOBS=${4:-4}; TIME_TOP=${5:-0}
+OUT=${1:?outdir}; SEEDS=${2:-"1 2 3"}; SECS=${3:-60}; JOBS=${4:-4}; TIME_TOP=${5:-0}; EXTRA=${6:-}
+# SAMPLES (environment): the C files, default tests/c_samples/*.c. EXTRA:
+# further superopt flags, e.g. --algorithmic-moves (section 190).
+SAMPLES=${SAMPLES:-tests/c_samples/*.c}
 # TIME_TOP > 0 (section 189): compiled timing inside the loop. The searches
 # then time code themselves, so they run with JOBS=1 (one at a time).
 mkdir -p "$OUT"
 one() {
-    f=$1; seed=$2; out=$3; secs=$4; ttop=$5
+    f=$1; seed=$2; out=$3; secs=$4; ttop=$5; more=$6
     s=$(basename "$f" .c); tag="$s.seed$seed"
     extra=""
     [ "$ttop" -gt 0 ] && extra="--time-top $ttop --work-dir $out/w_$tag"
     timeout $((secs * 4 + 300)) ./algosearch superopt "$f" --seconds "$secs" --seed "$seed" --out "$out/$tag.found.c" \
-        $extra > "$out/$tag.log" 2>&1
+        $extra $more > "$out/$tag.log" 2>&1
     rm -rf "$out/w_$tag"
     echo "rc $?" >> "$out/$tag.log"
 }
 export -f one
-for f in tests/c_samples/*.c; do for seed in $SEEDS; do echo "$f $seed"; done; done |
-    xargs -P "$JOBS" -n 2 bash -c 'one "$0" "$1" "'"$OUT"'" "'"$SECS"'" "'"$TIME_TOP"'"'
+for f in $SAMPLES; do for seed in $SEEDS; do echo "$f $seed"; done; done |
+    xargs -P "$JOBS" -n 2 bash -c 'one "$0" "$1" "'"$OUT"'" "'"$SECS"'" "'"$TIME_TOP"'" "'"$EXTRA"'"'
 printf 'sample\tseed\tverified\tref_cost\tbest_cost\tmodel_speedup\tref_size\tbest_size\tcounterexamples\tequivalence\tspeedup\tby_order\tref_ns\tcand_ns\tinline_speedup\tinline_ref_ns\tloop_measured\tloop_self\tloop_noise\tmodel_best_cost\n' > "$OUT/summary.tsv"
-for f in tests/c_samples/*.c; do for seed in $SEEDS; do
+for f in $SAMPLES; do for seed in $SEEDS; do
     s=$(basename "$f" .c); tag="$s.seed$seed"; log="$OUT/$tag.log"
     get() { grep -m1 "^$1 " "$log" | cut -d' ' -f2; }
     eq=NONE; sp=""; bo=""; rn=""; cn=""; isp=""; irn=""
@@ -45,7 +48,7 @@ for f in tests/c_samples/*.c; do for seed in $SEEDS; do
 done; done
 # External self-control per sample (the original against itself), both modes.
 printf 'sample\tself_call\tself_inline\n' > "$OUT/self_control.tsv"
-for f in tests/c_samples/*.c; do
+for f in $SAMPLES; do
     s=$(basename "$f" .c)
     a=$(python3 scripts/c_speedup.py "$f" "$f" --workdir "$OUT/self_$s" | grep -oE 'speedup [0-9.]+' | cut -d' ' -f2)
     b=$(python3 scripts/c_speedup.py "$f" "$f" --inline --workdir "$OUT/selfi_$s" | grep -oE 'speedup [0-9.]+' | cut -d' ' -f2)

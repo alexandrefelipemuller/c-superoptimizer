@@ -46,7 +46,7 @@ pointers to the raw data backing each claim.
 
 ```sh
 make            # builds ./algosearch
-make test       # builds and runs ./algosearch_tests (299 unit/integration tests)
+make test       # builds and runs ./algosearch_tests (303 unit/integration tests)
 ```
 
 ## Running a search
@@ -80,8 +80,10 @@ oracle and emits the solution as C. `algosearch superopt FILE.c` starts from
 the function itself and searches for a cheaper equivalent; `scripts/c_speedup.py`
 measures the compiled speedup. With `--time-top 4` it times the best candidates
 compiled inside the search and returns the original unless something is
-measurably faster: on the 15 samples, `sign` 1.64x and `is_pow2_loop` 1.2x, no
-regressions.
+measurably faster. Its edits include algorithmic moves (loop unrolling,
+branch-free selects, early exits, strength reduction). On 23 samples it finds
+gains on 7, for example Kernighan's popcount unrolled (1.97x), count of
+trailing zeros (1.29x) and `sign` (1.64x), with no slower result.
 Semantics, ABI, supported subset, results and the plan are in `docs/superopt.md`.
 
 ## Results

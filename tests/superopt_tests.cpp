@@ -131,3 +131,73 @@ TEST(timed_superopt_returns_the_reference_unless_measurably_faster) {
     bool isReference = printStmt(*r.best) == printStmt(problem.referenceProgram());
     CHECK(isReference ? r.measuredSpeedup == 1.0 : r.measuredSpeedup > 1.0 + r.noiseThreshold);
 }
+
+namespace {
+
+// Final arrays of `a` and `b` agree on every input (both run in wraparound mode).
+bool sameBehaviour(const Stmt& a, const Stmt& b, const std::vector<std::vector<int>>& inputs, int numVars) {
+    Interpreter interp(1'000'000);
+    interp.setWrapArithmetic(true);
+    std::vector<int> oa, ob;
+    for (const auto& in : inputs) {
+        RunStatus ra = interp.run(a, in, numVars, oa);
+        RunStatus rb = interp.run(b, in, numVars, ob);
+        if (ra != rb || (ra == RunStatus::COMPLETED && oa != ob)) return false;
+    }
+    return true;
+}
+
+}  // namespace
+
+TEST(superopt_unroll_move_preserves_behaviour) {
+    Program loop = parseProgram(
+        "v1 = arr[0];\nv2 = 0;\nwhile (v1) {\n  if ((v1 == 7)) {\n    continue;\n  }\n  v1 = (v1 & (v1 - 1));\n"
+        "  v2 = (v2 + 1);\n}\narr[0] = v2;\n");
+    CHECK(loop != nullptr);
+    Program un = applyAlgorithmicMove(*loop, 0, 4, 1, 1);
+    CHECK(un != nullptr);
+    CHECK(un->size() > loop->size() + 8);
+    std::vector<std::vector<int>> inputs;
+    for (int x : {0, 1, 2, 3, 6, 8, 255, 1 << 20, -1, -8, 123456789}) inputs.push_back({x});
+    CHECK(sameBehaviour(*loop, *un, inputs, 4));  // `continue` (an infinite loop at 7) too: both time out
+}
+
+TEST(superopt_branch_free_move_gives_a_select) {
+    Program absIf = parseProgram("v1 = arr[0];\nif ((v1 < 0)) {\n  v1 = (0 - v1);\n}\narr[0] = v1;\n");
+    Program sel = applyAlgorithmicMove(*absIf, 1, 4, 1, 1);
+    CHECK(sel != nullptr);
+    CHECK(printStmt(*sel).find("if") == std::string::npos);
+    std::vector<std::vector<int>> inputs;
+    for (int x : {0, 1, -1, 5, -5, 2147483647, -2147483647 - 1}) inputs.push_back({x});
+    CHECK(sameBehaviour(*absIf, *sel, inputs, 4));
+    Program maxIf = parseProgram("if ((arr[0] > arr[1])) {\n  v1 = arr[0];\n} else {\n  v1 = arr[1];\n}\narr[0] = v1;\n");
+    Program sel2 = applyAlgorithmicMove(*maxIf, 1, 4, 2, 1);
+    CHECK(sel2 != nullptr);
+    std::vector<std::vector<int>> pairs = {{1, 2}, {2, 1}, {-3, -3}, {2147483647, -2147483647 - 1}, {-7, 9}};
+    CHECK(sameBehaviour(*maxIf, *sel2, pairs, 4));
+}
+
+TEST(superopt_strength_reduction_and_loop_to_if_moves) {
+    Program mul = parseProgram("arr[0] = ((arr[0] * 8) + (arr[0] % 4));\n");
+    for (uint64_t seed = 1; seed <= 6; ++seed) {
+        Program r = applyAlgorithmicMove(*mul, 4, 4, 1, seed);
+        CHECK(r != nullptr);
+        std::string t = printStmt(*r);
+        CHECK(t.find("<< 3") != std::string::npos || t.find("& 3") != std::string::npos);
+    }
+    Program w = parseProgram("v1 = arr[0];\nwhile ((v1 > 10)) {\n  v1 = (v1 - 10);\n}\narr[0] = v1;\n");
+    Program once = applyAlgorithmicMove(*w, 3, 4, 1, 1);
+    CHECK(once != nullptr);
+    CHECK(printStmt(*once).find("while") == std::string::npos);
+    CHECK(applyAlgorithmicMove(*mul, 0, 4, 1, 1) == nullptr);  // no loop to unroll
+}
+
+TEST(superopt_algorithmic_moves_off_leave_phase_3_edits_unchanged) {
+    Program p = parseProgram("v1 = arr[0];\nwhile ((v1 > 0)) {\n  v1 = (v1 - 3);\n}\narr[0] = v1;\n");
+    for (uint64_t seed = 1; seed <= 30; ++seed)
+        CHECK(printStmt(*mutateForSuperopt(*p, 4, 1, seed)) == printStmt(*mutateForSuperopt(*p, 4, 1, seed, false)));
+    int differs = 0;
+    for (uint64_t seed = 1; seed <= 60; ++seed)
+        differs += printStmt(*mutateForSuperopt(*p, 4, 1, seed)) != printStmt(*mutateForSuperopt(*p, 4, 1, seed, true));
+    CHECK(differs > 0);
+}

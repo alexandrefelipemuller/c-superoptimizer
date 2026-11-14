@@ -36,6 +36,10 @@ struct SuperoptConfig {
     std::string workDir = "/tmp/algosearch_superopt";
     int timedParents = 6;         // fastest timed programs used as parents
     double timeFraction = 0.5;    // at most this share of the wall clock goes to timing
+    int timingInputs = 512;       // fresh inputs for compiled timing (section 190: 24 let branches be memorized)
+    // Phase 3c (log 190/190b): algorithmic moves in a quarter of the edits; default
+    // since 190b (`--no-algorithmic-moves` restores phase 3b).
+    bool algorithmicMoves = true;
 };
 
 struct SuperoptResult {
@@ -90,7 +94,16 @@ private:
 
 // One random local edit of `program` (exposed for tests). `numVars` bounds
 // the variables a new expression may read or write; `arity` is the number
-// of scalar arguments (0 for an array function).
-Program mutateForSuperopt(const Stmt& program, int numVars, int arity, uint64_t seed);
+// of scalar arguments (0 for an array function). `algorithmic` adds the
+// phase 3c moves (loop unrolling, if -> branch-free select, early exits,
+// loop -> if, strength reduction by powers of two) to a quarter of the
+// edits; off, the edits are exactly those of phase 3.
+Program mutateForSuperopt(const Stmt& program, int numVars, int arity, uint64_t seed, bool algorithmic = false,
+                          bool returnsValue = true);
+
+// One specific phase 3c move (0 unroll, 1 branch-free select, 2 early exit,
+// 3 loop -> if, 4 strength reduction), for tests; null when it does not apply.
+Program applyAlgorithmicMove(const Stmt& program, int move, int numVars, int arity, uint64_t seed,
+                             bool returnsValue = true);
 
 }  // namespace algosearch
