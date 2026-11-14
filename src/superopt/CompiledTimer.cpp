@@ -72,6 +72,19 @@ std::string replaceAll(std::string s, const std::string& from, const std::string
     return s;
 }
 
+// Every function the source defines gets the side's prefix (helpers too, so
+// an original with helpers can be timed against itself in one unit); the
+// timed function becomes `<prefix>fn`.
+std::string prefixFunctions(const std::string& src, const std::string& prefix, const std::string& target) {
+    static const std::regex def("\\b(?:int|void|int32_t)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
+    std::string out = src;
+    for (auto it = std::sregex_iterator(src.begin(), src.end(), def); it != std::sregex_iterator(); ++it) {
+        std::string name = (*it)[1].str();
+        out = std::regex_replace(out, std::regex("\\b" + name + "\\b"), prefix + (name == target ? "fn" : name));
+    }
+    return out;
+}
+
 std::string callFor(const CFunctionAbi& abi, const std::string& fn) {
     if (abi.kind == CFunctionAbi::Kind::Scalars) {
         std::string args;
@@ -101,10 +114,9 @@ CompiledTimer::CompiledTimer(std::string originalSource, CFunctionAbi abi, std::
 
 CompiledTimer::Timing CompiledTimer::time(const std::string& candidateSource, int trials) const {
     Timing t;
-    std::regex name("\\b" + abi_.name + "\\b");
     std::string src = harnessTemplate;
-    src = replaceAll(src, "%REF%", std::regex_replace(originalSource_, name, "ref_fn"));
-    src = replaceAll(src, "%CAND%", std::regex_replace(candidateSource, name, "cand_fn"));
+    src = replaceAll(src, "%REF%", prefixFunctions(originalSource_, "ref_", abi_.name));
+    src = replaceAll(src, "%CAND%", prefixFunctions(candidateSource, "cand_", abi_.name));
     src = replaceAll(src, "%CALL_REF%", callFor(abi_, "ref_fn"));
     src = replaceAll(src, "%CALL_CAND%", callFor(abi_, "cand_fn"));
     std::string base = workDir_ + "/t" + std::to_string(compilations_++);

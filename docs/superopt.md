@@ -18,8 +18,9 @@ Interface gaps (planned 2026-11-13), and their status:
 | 3 | cost model; search from the reference, objective cost given correctness; compiled speedup measurement | done (log 188-188b): one real gain; the uncalibrated model does not predict compiled time |
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
 | 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs |
-| 4 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | |
-| 5 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
+| 4 | larger functions and real code, in small steps. 4a: constant `#define`, `INT_MAX`/`INT_MIN`, inlined `return expr;` helpers, `continue` in any loop, target picked automatically | 4a done (log 191): 8 real-style samples import exactly; 1 gain of 6 measurable; no gain returns the original text |
+| 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | |
+| 6 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
 ## Semantics (phase 0)
 
@@ -53,14 +54,29 @@ private variable, so `v0` is always the length register the search expects.
 
 Supported: `int`/`int32_t`/`const int` scalars and locals, one array
 parameter `int *a` / `int a[]` plus its length, `if`/`else`, `while`,
-`do`/`while`, `for`, `break`, `continue` (not inside a `for` with a step or a
-`do`/`while` yet), `return`, `=`, compound assignment, `++`/`--` as
-statements, every Mini-C operator, unary `-`, `~`, `!`, casts to `int`, and
-`&&`, `||`, `?:`. Short circuit is preserved: when the right operand can fail
-(array read, `/`, `%`, shift) it is evaluated in a guarded temporary, so
-`i < n && a[i] > 0` never reads `a[n]`. Anything else (other types, pointers,
-calls, assignments inside expressions, macros, local arrays) throws
-`CImportError` with the line; nothing is approximated.
+`do`/`while`, `for`, `break`, `continue`, `return`, `=`, compound assignment,
+`++`/`--` as statements, every Mini-C operator, unary `-`, `~`, `!`, casts to
+`int`, and `&&`, `||`, `?:`. Short circuit is preserved: when the right operand
+can fail (array read, `/`, `%`, shift) it is evaluated in a guarded temporary,
+so `i < n && a[i] > 0` never reads `a[n]`.
+
+Since phase 4a (log 191):
+
+- Object-like `#define NAME body` is expanded at lexing. `INT_MAX` and
+  `INT_MIN` are predefined, and `#include` lines are ignored.
+- A call to another function of the file whose body is `return expr;` is
+  inlined. Each argument is evaluated once, in order, into a temporary, under
+  the same guard as the call.
+- `continue` in a `for` with a step or a `do`/`while` translates as
+  `while (1) { B; break; }`. Inside it, `continue` is the inner break and
+  `break` sets a flag that leaves the outer loop.
+- Without `--func`, the target is the file's only function that no other
+  function calls.
+
+Anything else throws `CImportError` with the line; nothing is approximated.
+That covers other types, pointers, function-like macros and `#if`, helpers
+with more than a `return`, recursive helpers, calls as statements,
+assignments inside expressions and local arrays.
 
 ## Emitter
 

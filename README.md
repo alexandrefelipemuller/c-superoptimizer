@@ -46,7 +46,7 @@ pointers to the raw data backing each claim.
 
 ```sh
 make            # builds ./algosearch
-make test       # builds and runs ./algosearch_tests (303 unit/integration tests)
+make test       # builds and runs ./algosearch_tests (306 unit/integration tests)
 ```
 
 ## Running a search
@@ -74,7 +74,8 @@ scripts/c_roundtrip.py tests/c_samples/*.c                     # interpreter = o
 scripts/c_roundtrip.py tests/c_samples/array_sum.c --candidate found.c
 ```
 
-A subset of C (`int` scalars, one `int *a, int n` array) is translated into
+A subset of C (`int` scalars, one `int *a, int n` array, constant `#define`s,
+small `return expr;` helpers, which are inlined) is translated into
 Mini-C and back, and `--problem c:FILE.c` searches with that function as the
 oracle and emits the solution as C. `algosearch superopt FILE.c` starts from
 the function itself and searches for a cheaper equivalent; `scripts/c_speedup.py`
@@ -84,6 +85,7 @@ measurably faster. Its edits include algorithmic moves (loop unrolling,
 branch-free selects, early exits, strength reduction). On 23 samples it finds
 gains on 7, for example Kernighan's popcount unrolled (1.97x), count of
 trailing zeros (1.29x) and `sign` (1.64x), with no slower result.
+When nothing is measurably faster it returns the original text unchanged.
 Semantics, ABI, supported subset, results and the plan are in `docs/superopt.md`.
 
 ## Results

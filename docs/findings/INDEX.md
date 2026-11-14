@@ -330,3 +330,5 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 190. (results) ON 7 gains vs 3, but 2 regressions: the 24-input in-loop timer let branches be memorized | 11_sections_121-125.md | 2180 |
 | 190b. (registered) A/B rerun with a 512-input compiled timer | 11_sections_121-125.md | 2189 |
 | 190b. (results) ON 7 vs OFF 4, no candidate regresses; algorithmic moves become the superopt default | 11_sections_121-125.md | 2195 |
+| 191. (registered) Phase 4a: #define, inlined helpers, continue in any loop; superopt battery on real-style C | 11_sections_121-125.md | 2205 |
+| 191. (results) 1 gain of 6 measurable (sum_abs_diff 1.14x); a slower re-emitted reference was returned (fixed: original text) | 11_sections_121-125.md | 2214 |

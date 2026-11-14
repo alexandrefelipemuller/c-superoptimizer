@@ -29,7 +29,33 @@ struct Token {
     throw CImportError("line " + std::to_string(line) + ": " + what);
 }
 
+using Defines = std::map<std::string, std::vector<Token>>;
+
+std::vector<Token> lexWith(const std::string& src, Defines& defines);
+
+// Object-like macros: `#define NAME body`, the body lexed with the macros
+// defined so far. Function-like macros are rejected.
+void defineMacro(const std::string& directive, int line, Defines& defines) {
+    std::smatch m;
+    if (!std::regex_search(directive, m, std::regex("^#\\s*define\\s+([A-Za-z_][A-Za-z0-9_]*)(.*)$")))
+        failAt(line, "malformed #define: " + directive);
+    std::string rest = m[2].str();
+    if (!rest.empty() && rest[0] == '(') failAt(line, "function-like macro not supported: " + directive);
+    std::vector<Token> body = lexWith(rest, defines);
+    body.pop_back();  // End
+    for (auto& t : body) t.line = line;
+    defines[m[1].str()] = body;
+}
+
 std::vector<Token> lex(const std::string& src) {
+    Defines defines;
+    defines["INT_MAX"] = lexWith("2147483647", defines);
+    defines["INT_MIN"] = lexWith("(-2147483647 - 1)", defines);
+    for (auto& [name, body] : defines) body.pop_back();
+    return lexWith(src, defines);
+}
+
+std::vector<Token> lexWith(const std::string& src, Defines& defines) {
     static const char* puncts[] = {"<<=", ">>=", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "++", "--", "+=",
                                    "-=",  "*=",  "/=", "%=", "&=", "|=", "^=", "->", "+",  "-",  "*",  "/",  "%",
                                    "&",   "|",   "^",  "~",  "!",  "<",  ">",  "=",  "?",  ":",  ";",  ",",  "(",
@@ -53,8 +79,11 @@ std::vector<Token> lex(const std::string& src) {
         if (lineStart && c == '#') {
             size_t e = src.find('\n', i);
             std::string directive = src.substr(i, e == std::string::npos ? std::string::npos : e - i);
-            if (!std::regex_search(directive, std::regex("^#\\s*include\\b")))
-                failAt(line, "preprocessor directive not supported (only #include is ignored): " + directive);
+            if (std::regex_search(directive, std::regex("^#\\s*define\\b")))
+                defineMacro(directive, line, defines);
+            else if (!std::regex_search(directive, std::regex("^#\\s*include\\b")))
+                failAt(line, "preprocessor directive not supported (only #include and constant #define): " +
+                                 directive);
             i = e == std::string::npos ? src.size() : e;
             continue;
         }
@@ -74,6 +103,14 @@ std::vector<Token> lex(const std::string& src) {
         if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
             size_t s = i;
             while (i < src.size() && (std::isalnum(static_cast<unsigned char>(src[i])) || src[i] == '_')) ++i;
+            auto macro = defines.find(src.substr(s, i - s));
+            if (macro != defines.end()) {
+                for (Token t : macro->second) {
+                    t.line = line;
+                    out.push_back(t);
+                }
+                continue;
+            }
             out.push_back({Tok::Ident, src.substr(s, i - s), line});
             continue;
         }
@@ -179,9 +216,27 @@ struct Translator {
     std::string arrayName;  // Array ABI: the pointer parameter
     std::vector<std::map<std::string, int>> scopes;
     int nextVar = 1;
-    // Innermost loop first: whether `continue` can be translated directly
-    // (a while loop) or not (a for loop with a step, a do-while).
-    std::vector<bool> continueOk;
+    // Enclosing loops, innermost last. `continue` is direct in a while loop.
+    // In a for loop with a step or a do-while it must still run the step (the
+    // condition): the body is then re-translated inside `while (1) { B; break; }`,
+    // where `continue` is that inner loop's break and `break` sets `flag`.
+    struct LoopCtx {
+        bool direct;
+        bool wrapped = false;
+        int flag = -1;
+        bool needsWrap = false;
+        bool usedBreak = false;
+    };
+    std::vector<LoopCtx> loops;
+    // Helpers: other functions of the file whose body is `return expr;`,
+    // inlined at each call with their arguments evaluated once, in order.
+    struct Helper {
+        std::vector<std::string> params;
+        CExprPtr expr;
+        std::string error;  // why it cannot be inlined
+    };
+    std::map<std::string, Helper> helpers;
+    std::vector<std::string> inlining;
 
     const Token& peek(size_t ahead = 0) const { return toks[std::min(pos + ahead, toks.size() - 1)]; }
     bool isPunct(const char* p, size_t ahead = 0) const {
@@ -319,8 +374,16 @@ struct Translator {
             e = node("id", t.line);
             e->name = t.text;
             ++pos;
-            if (isPunct("(")) failAt(t.line, "function calls not supported ('" + t.text + "')");
-            if (isPunct("[")) {
+            if (eat("(")) {
+                auto call = node("call", t.line);
+                call->name = t.text;
+                if (!eat(")")) {
+                    do call->kids.push_back(parseExpr());
+                    while (eat(","));
+                    expect(")");
+                }
+                e = std::move(call);
+            } else if (isPunct("[")) {
                 if (t.text != arrayName) failAt(t.line, "'" + t.text + "' is not the array parameter");
                 ++pos;
                 auto ix = node("index", t.line);
@@ -357,6 +420,7 @@ struct Translator {
             return makeIntConst(static_cast<int>(e.value));
         }
         if (e.op == "id") return makeVar(lookup(e.name, e.line));
+        if (e.op == "call") return inlineCall(e, pre);
         if (e.op == "index") return makeArrayAccess(lower(*e.kids[0], pre));
         if (e.op == "neg") return makeBinOp(ExprKind::Sub, makeIntConst(0), lower(*e.kids[0], pre));
         if (e.op == "~") return makeBinOp(ExprKind::BitXor, lower(*e.kids[0], pre), makeIntConst(-1));
@@ -397,7 +461,65 @@ struct Translator {
         return makeBinOp(k->second, std::move(a), std::move(b));
     }
 
+    ExprPtr inlineCall(const CExpr& e, std::vector<StmtPtr>& pre) {
+        auto h = helpers.find(e.name);
+        if (h == helpers.end()) failAt(e.line, "call to '" + e.name + "': not a function defined in this file");
+        if (!h->second.error.empty()) failAt(e.line, "cannot inline '" + e.name + "': " + h->second.error);
+        if (std::find(inlining.begin(), inlining.end(), e.name) != inlining.end())
+            failAt(e.line, "recursive helper '" + e.name + "' not supported");
+        if (e.kids.size() != h->second.params.size())
+            failAt(e.line, "'" + e.name + "' takes " + std::to_string(h->second.params.size()) + " arguments");
+        std::map<std::string, int> bound;
+        for (size_t k = 0; k < e.kids.size(); ++k) {
+            ExprPtr v = lower(*e.kids[k], pre);
+            int t;
+            if (v->kind == ExprKind::Var) {
+                t = v->varIndex;  // temporaries never write user variables
+            } else {
+                t = newTemp();
+                pre.push_back(makeAssign(t, std::move(v)));
+            }
+            bound[h->second.params[k]] = t;
+        }
+        auto saved = std::move(scopes);
+        scopes = {bound};
+        inlining.push_back(e.name);
+        ExprPtr r = lower(*h->second.expr, pre);
+        inlining.pop_back();
+        scopes = std::move(saved);
+        return r;
+    }
+
     // ------------------------------------------------------- statements
+
+    // A loop body (see LoopCtx): translated directly, or wrapped when a
+    // `continue` must still run the step / condition.
+    std::vector<StmtPtr> loopBody(bool direct) {
+        size_t save = pos;
+        int saveVar = nextVar;
+        loops.push_back({direct});
+        auto b = body();
+        LoopCtx c = loops.back();
+        loops.pop_back();
+        if (!c.needsWrap) return b;
+        pos = save;
+        nextVar = saveVar;
+        int flag = newTemp();
+        loops.push_back({false, true, flag});
+        b = body();
+        c = loops.back();
+        loops.pop_back();
+        std::vector<StmtPtr> out;
+        if (c.usedBreak) out.push_back(makeAssign(flag, makeIntConst(0)));
+        b.push_back(makeBreak());
+        out.push_back(makeWhile(makeIntConst(1), std::move(b)));
+        if (c.usedBreak) {
+            std::vector<StmtPtr> brk;
+            brk.push_back(makeBreak());
+            out.push_back(makeIf(makeVar(flag), std::move(brk)));
+        }
+        return out;
+    }
 
     void appendAll(std::vector<StmtPtr>& out, std::vector<StmtPtr>& more) {
         for (auto& s : more) out.push_back(std::move(s));
@@ -434,7 +556,7 @@ struct Translator {
             index = parseExpr();
             expect("]");
         }
-        if (isPunct("(")) failAt(line, "function calls not supported ('" + name + "')");
+        if (isPunct("(")) failAt(line, "a call as a statement is not supported ('" + name + "'): its value is unused");
         std::string op;  // "=" or the binary operator of a compound/increment
         bool increment = false;
         if (!prefix.empty()) {
@@ -548,9 +670,7 @@ struct Translator {
             std::vector<StmtPtr> pre;
             ExprPtr test;
             loopCondition(c.get(), pre, test);
-            continueOk.push_back(true);
-            auto loopBody = body();
-            continueOk.pop_back();
+            auto loopBody = this->loopBody(true);
             if (pre.empty()) {
                 out.push_back(makeWhile(std::move(test), std::move(loopBody)));
             } else {
@@ -563,9 +683,7 @@ struct Translator {
         }
         if (isWord("do")) {
             ++pos;
-            continueOk.push_back(false);
-            auto loopBody = body();
-            continueOk.pop_back();
+            auto loopBody = this->loopBody(false);
             if (!isWord("while")) failAt(peek().line, "expected 'while' after do body");
             ++pos;
             expect("(");
@@ -605,9 +723,7 @@ struct Translator {
             std::vector<StmtPtr> pre;
             ExprPtr test;
             loopCondition(c.get(), pre, test);
-            continueOk.push_back(step.empty());
-            auto loopBody = body();
-            continueOk.pop_back();
+            auto loopBody = this->loopBody(step.empty());
             scopes.pop_back();
             appendAll(loopBody, step);
             appendAll(out, init);
@@ -623,17 +739,25 @@ struct Translator {
         if (isWord("break")) {
             ++pos;
             expect(";");
-            if (continueOk.empty()) failAt(line, "break outside a loop");
+            if (loops.empty()) failAt(line, "break outside a loop");
+            if (loops.back().wrapped) {
+                loops.back().usedBreak = true;
+                out.push_back(makeAssign(loops.back().flag, makeIntConst(1)));
+            }
             out.push_back(makeBreak());
             return;
         }
         if (isWord("continue")) {
             ++pos;
             expect(";");
-            if (continueOk.empty()) failAt(line, "continue outside a loop");
-            if (!continueOk.back())
-                failAt(line, "continue inside a for loop with a step or a do-while not supported yet");
-            out.push_back(makeContinue());
+            if (loops.empty()) failAt(line, "continue outside a loop");
+            LoopCtx& c = loops.back();
+            if (c.wrapped) {
+                out.push_back(makeBreak());  // leaves the inner while(1): the step runs next
+            } else {
+                c.needsWrap = c.needsWrap || !c.direct;
+                out.push_back(makeContinue());
+            }
             return;
         }
         if (isWord("return")) {
@@ -660,7 +784,40 @@ struct Translator {
     struct Definition {
         std::string name;
         size_t start;  // token index of the return type
+        size_t end;    // one past the closing brace
     };
+
+    // A helper `int name(int x, ...) { return expr; }`: its expression, or
+    // why it cannot be inlined (recorded, reported only if it is called).
+    void parseHelper(const Definition& d) {
+        Helper h;
+        try {
+            pos = d.start;
+            while (isWord("static") || isWord("inline")) ++pos;
+            if (isWord("void")) failAt(peek().line, "a void helper has no value to inline");
+            intType();
+            ident();
+            expect("(");
+            if (isWord("void") && isPunct(")", 1)) ++pos;
+            while (!eat(")")) {
+                if (!h.params.empty()) expect(",");
+                rejectOtherTypes();
+                intType();
+                if (isPunct("*") || isPunct("[", 1)) failAt(peek().line, "helpers take int scalars only");
+                h.params.push_back(ident());
+            }
+            expect("{");
+            if (!isWord("return")) failAt(peek().line, "only helpers whose body is `return expr;` are inlined");
+            ++pos;
+            h.expr = parseExpr();
+            expect(";");
+            if (!isPunct("}")) failAt(peek().line, "only helpers whose body is `return expr;` are inlined");
+        } catch (const CImportError& err) {
+            h.error = err.what();
+            h.expr = nullptr;
+        }
+        helpers[d.name] = std::move(h);
+    }
 
     std::vector<Definition> findDefinitions() {
         std::vector<Definition> defs;
@@ -689,7 +846,7 @@ struct Translator {
                 if (isPunct("}")) --depth;
                 ++pos;
             } while (depth > 0);
-            defs.push_back({name, start});
+            defs.push_back({name, start, pos});
         }
         return defs;
     }
@@ -953,15 +1110,28 @@ CImport importCFunction(const std::string& source, const std::string& funcName) 
     auto defs = t.findDefinitions();
     const Translator::Definition* chosen = nullptr;
     std::string names;
+    // Without --func: the only function, or else the only one no other
+    // function of the file calls (the helpers are the called ones).
+    std::vector<const Translator::Definition*> uncalled;
+    for (const auto& d : defs) {
+        bool called = false;
+        for (const auto& o : defs)
+            for (size_t k = o.start; &o != &d && k + 1 < o.end && !called; ++k)
+                called = t.toks[k].kind == Tok::Ident && t.toks[k].text == d.name && t.toks[k + 1].text == "(";
+        if (!called) uncalled.push_back(&d);
+    }
     for (const auto& d : defs) {
         names += (names.empty() ? "" : ", ") + d.name;
         if (funcName.empty() ? defs.size() == 1 : d.name == funcName) chosen = &d;
     }
+    if (chosen == nullptr && funcName.empty() && uncalled.size() == 1) chosen = uncalled[0];
     if (chosen == nullptr) {
         if (defs.empty()) throw CImportError("no function definition found");
         throw CImportError(funcName.empty() ? "several functions (" + names + "): choose one with --func"
                                             : "function '" + funcName + "' not found (have: " + names + ")");
     }
+    for (const auto& d : defs)
+        if (&d != chosen) t.parseHelper(d);
     t.pos = chosen->start;
     std::vector<StmtPtr> prologue = t.signature();
     std::vector<StmtPtr> body = t.body();

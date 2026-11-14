@@ -196,7 +196,12 @@ int runSuperoptTool(int argc, char** argv) {
         for (const auto& [t, c] : r.trajectory) std::cout << " " << t << ":" << c;
         std::cout << "\n--- Mini-C\n" << printStmt(*r.best);
         std::string c = emitCFunction(*r.best, problem.abi());
-        std::cout << "--- C\n" << c;
+        // Timed mode with no measurable gain: the original text itself, not
+        // the reference re-emitted from Mini-C, which can compile worse (log
+        // 191: sat_add's `&&` became `&`, 0.54x).
+        bool original = cfg.timeTopK > 0 && printStmt(*r.best) == printStmt(problem.referenceProgram());
+        if (original) c = source;
+        std::cout << "returned " << (original ? "original" : "candidate") << "\n--- C\n" << c;
         if (!outPath.empty()) std::ofstream(outPath) << c;
         return r.verified ? 0 : 3;
     } catch (const CImportError& e) {

@@ -149,9 +149,9 @@ TEST(c_import_rejects_constructs_outside_the_subset) {
     CHECK(rejects("int f(int x) { return g(x); }"));
     CHECK(rejects("int f(int *a, int n) { return *a; }"));
     CHECK(rejects("int f(int x) { int y = x++; return y; }"));
-    CHECK(rejects("int f(int x) { for (int i = 0; i < x; i++) { if (i == 2) continue; } return x; }"));
     CHECK(rejects("int f(int x) { long y = x; return y; }"));
-    CHECK(rejects("#define K 3\nint f(int x) { return x + K; }"));
+    CHECK(rejects("#define SQ(x) ((x) * (x))\nint f(int x) { return SQ(x); }"));  // function-like macro
+    CHECK(rejects("#if 1\nint f(int x) { return x; }\n#endif"));
     CHECK(rejects("int f(int x) { return x; } int g(int x) { return x; }"));  // ambiguous without a name
     CHECK(!rejects("#include <stdint.h>\nint32_t f(int32_t x) { return x; }"));
 }
@@ -179,4 +179,75 @@ TEST(c_emit_int_array_function_leaves_caller_array_untouched) {
     std::string c3 = emitCFunction(*tail.program, tail.abi);
     CHECK(c3.find("return 1;") != std::string::npos);
     CHECK(c3.find("int arr[") == std::string::npos);
+}
+
+TEST(c_import_constant_defines_and_limits) {
+    CImport imp = importCFunction(
+        "#include <limits.h>\n#define LOW 10\n#define SPAN (LOW * 2)\n"
+        "int f(int x) { if (x == INT_MIN) return INT_MAX; return x < LOW ? LOW : x > SPAN ? SPAN : x; }");
+    for (int x : scalarValues) {
+        bool ok = false;
+        int r = runImport(imp, {x}, ok)[0];
+        CHECK(ok);
+        CHECK_EQ(r, x == INT_MIN ? INT_MAX : x < 10 ? 10 : x > 20 ? 20 : x);
+    }
+}
+
+TEST(c_import_inlines_single_return_helpers_once_per_argument) {
+    // pos() reads its argument twice; a[i + 1] is guarded by the && and
+    // must not be read at i = n - 1.
+    CImport imp = importCFunction(
+        "static inline int pos(int v) { return v > 0 && v < 100; }\n"
+        "static int twice(int v) { return pos(v) + pos(v); }\n"
+        "int f(int *a, int n) { int c = 0; for (int i = 0; i < n; i++) if (i + 1 < n && pos(a[i + 1])) c += twice(a[i]);"
+        " return c; }");
+    CHECK_EQ(imp.abi.name, std::string("f"));  // the function no other one calls
+    bool ok = false;
+    CHECK_EQ(runImport(imp, {5, 7, -1, 3}, ok)[0], 2);  // i = 0 (7 > 0, a[0] = 5 counts twice)
+    CHECK(ok);
+    CHECK_EQ(runImport(imp, {5, 7, 8, 200}, ok)[0], 4);
+    CHECK(ok);
+    CHECK(rejects("static int g(int x) { int y = x; return y; }\nint f(int x) { return g(x); }"));
+    CHECK(rejects("static int g(int x) { return g(x - 1); }\nint f(int x) { return g(x); }"));
+    CHECK(rejects("int f(int x) { return abs(x); }"));  // not defined in the file
+    // A helper that cannot be inlined is fine as long as it is not called.
+    bool threw = false;
+    try {
+        importCFunction("static int g(int *a) { return a[0]; }\nint f(int x) { return x; }", "f");
+    } catch (const CImportError&) {
+        threw = true;
+    }
+    CHECK(!threw);
+}
+
+TEST(c_import_continue_in_for_with_step_and_do_while) {
+    // continue must still run i++; break leaves the outer loop.
+    CImport imp = importCFunction(
+        "int f(int *a, int n) { int s = 0; for (int i = 0; i < n; i++) { if (a[i] < 0) continue;"
+        " if (a[i] == 99) break; for (int j = 0; j < 2; j++) { if (j == 0) continue; s += a[i]; } } return s; }");
+    std::vector<std::vector<int>> cases = {{1, -2, 3}, {4, 99, 5}, {-1, -1}, {7}};
+    for (const auto& in : cases) {
+        int expect = 0;
+        for (int v : in) {
+            if (v < 0) continue;
+            if (v == 99) break;
+            expect += v;
+        }
+        bool ok = false;
+        CHECK_EQ(runImport(imp, in, ok)[0], expect);
+        CHECK(ok);
+    }
+    CImport dw = importCFunction(
+        "int g(int x) { int c = 0; do { x = x >> 1; if (x & 1) continue; c++; } while (x != 0 && x != -1); return c; }");
+    for (int x : scalarValues) {
+        int y = x, expect = 0;
+        do {
+            y = y >> 1;
+            if (y & 1) continue;
+            expect++;
+        } while (y != 0 && y != -1);
+        bool ok = false;
+        CHECK_EQ(runImport(dw, {x}, ok)[0], expect);
+        CHECK(ok);
+    }
 }
