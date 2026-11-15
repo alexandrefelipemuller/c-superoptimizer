@@ -19,7 +19,7 @@ Interface gaps (planned 2026-11-13), and their status:
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
 | 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs |
 | 4 | larger functions and real code, in small steps. 4a: constant `#define`, `INT_MAX`/`INT_MIN`, inlined `return expr;` helpers, `continue` in any loop, target picked automatically | 4a done (log 191): 8 real-style samples import exactly; 1 gain of 6 measurable; no gain returns the original text |
-| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193) |
+| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194) |
 | 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | started (log 192): boundary inputs in CEGIS; unary total functions checked on all 2^32 arguments compiled |
 | 6 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -76,6 +76,14 @@ Since phase 4a (log 191):
 - Character literals (log 193) are int constants: one ASCII character or
   escape (`\n`, `\0`, `\'`, octal, `\xHH`). Values above 127 are rejected,
   since their value depends on whether `char` is signed.
+- 32-bit `unsigned` (log 194): `unsigned`, `unsigned int`, `uint32_t` and
+  casts between them and int, typed by C's usual arithmetic conversions. The
+  Mini-C value is the int with the same bits. Ordered comparisons become
+  `(a ^ INT_MIN) < (b ^ INT_MIN)`, and an unsigned `>>` becomes a masked
+  arithmetic shift. A `u` suffix and hex/octal literals above `INT_MAX` are
+  unsigned, as in C. Unsigned `/` and `%` are still rejected, and so are
+  `unsigned char/short/long` and `L` suffixes. The emitter keeps the
+  original signature.
 
 Anything else throws `CImportError` with the line; nothing is approximated.
 That covers other types, pointers, function-like macros and `#if`, helpers
@@ -220,10 +228,13 @@ self-control of the same function.
 `superopt` prints `equivalence_level`:
 
 - `reference`: nothing changed; the original text is returned.
-- `exhaustive`: a unary function whose reference cannot fail at run time.
-  The accepted program was compiled and compared with the original on all
-  2^32 arguments (about 5 s). A timed winner that this check refutes is
-  skipped (`exhaustive_rejected`).
+- `exhaustive`: a unary function. The accepted program was compiled and
+  compared with the original on all 2^32 arguments (about 5 s, limit 60 s).
+  Where the reference may fail, a mismatch counts only on an argument the
+  reference defines (log 194), because the compiled values elsewhere are
+  undefined. A timed winner that this check refutes is skipped
+  (`exhaustive_rejected`). A check that times out or crashes leaves the
+  level at `tested`.
 - `tested`: tests, CEGIS and boundary inputs only. Boundary inputs are the
   reference's constants (constant subexpressions folded) +-2 in each argument,
   plus the whole tail for a constant within 4096 of an int limit.
@@ -244,6 +255,7 @@ Inputs the reference fails on are outside the domain everywhere, including
     scripts/c_census.py --out T.tsv --keep DIR SRC/ # which functions of a code base import on their own
     ./algosearch superopt FILE.c --seconds 60 --out X.c  # phase 3
     scripts/c_speedup.py FILE.c X.c                  # compiled speedup
+    scripts/c_speedup.py FILE.c X.c --inline --inputs-file W.txt   # on a given workload
 
     ./algosearch --problem c:tests/c_samples/array_sum.c --max-n 30 --beam-width 500 \
         --candidates 1500 --max-program-size 150 --seed 2 --c-out found.c

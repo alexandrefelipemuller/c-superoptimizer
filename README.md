@@ -46,7 +46,7 @@ pointers to the raw data backing each claim.
 
 ```sh
 make            # builds ./algosearch
-make test       # builds and runs ./algosearch_tests (309 unit/integration tests)
+make test       # builds and runs ./algosearch_tests (310 unit/integration tests)
 ```
 
 ## Running a search

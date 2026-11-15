@@ -214,6 +214,13 @@ TEST(compiled_exhaustive_check_finds_a_single_wrong_argument) {
     CHECK(off.complete);
     CHECK_EQ(off.mismatches, 1LL);
     CHECK_EQ(off.firstBad, 2147483641);
+    CHECK(off.bad == std::vector<int>{2147483641});
+    // Unsigned signatures (log 194): both sides are renamed, so they link in one unit.
+    std::string u = "#include <stdint.h>\nstatic uint32_t g(uint32_t x) { return x >> 1; }\n";
+    CompiledTimer utimer(u, importCFunction(u).abi, {{1}, {2}}, "/tmp/algosearch_exhaustive_test");
+    CompiledTimer::Exhaustive ux = utimer.exhaustive("unsigned g(unsigned x) { return (int)x >> 1 & 0x7fffffff; }\n");
+    CHECK(ux.complete);
+    CHECK_EQ(ux.mismatches, 0LL);
 }
 
 TEST(reference_problem_errors_outside_its_domain_are_not_failures) {

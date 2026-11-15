@@ -222,7 +222,9 @@ def linkable(src, func, out):
     another translation unit can call it (real code, log 192: static helpers
     such as musl's is_leap)."""
     text = open(src).read()
-    text = re.sub(rf"\bstatic\s+((?:inline\s+)?(?:int|void)\s+{func}\s*\()", r"\1", text)
+    # `inline` goes too: a plain C99 `inline` definition emits no symbol.
+    text = re.sub(rf"\bstatic\s+(?:inline\s+)?((?:(?:unsigned\s+)?int|unsigned|uint32_t|int32_t|void)\s+{func}\s*\()",
+                  r"\1", text)
     with open(out, "w") as f:
         f.write(text)
     return out
@@ -232,7 +234,7 @@ def run(cmd, **kw):
 
 
 def measure(original, candidate, algosearch="./algosearch", n_inputs=512, trials=15, seed=1, workdir=None,
-            inline=False):
+            inline=False, inputs_file=None):
     head = run([algosearch, "c-import", original])
     if head.returncode != 0:
         raise SystemExit(f"import failed: {head.stderr.strip()}")
@@ -241,7 +243,11 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=512, trials
     d = workdir or tempfile.mkdtemp(prefix="c_speedup_")
     os.makedirs(d, exist_ok=True)
     rng = random.Random(seed)
-    inputs = gen_inputs(abi, params, n_inputs * 2, rng)
+    if inputs_file:
+        # A given workload (log 194): one input per line, in --eval format.
+        inputs = [l.strip() for l in open(inputs_file) if l.strip()]
+    else:
+        inputs = gen_inputs(abi, params, n_inputs * 2, rng)
     with open(os.path.join(d, "inputs.txt"), "w") as f:
         f.write("\n".join(inputs) + "\n")
     ev = run([algosearch, "c-import", original, "--eval", os.path.join(d, "inputs.txt"), "--step-limit", "1000000"])
@@ -289,11 +295,15 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--algosearch", default="./algosearch")
     ap.add_argument("--workdir", default=None)
+    ap.add_argument("--inputs-file", default=None,
+                    help="time on these inputs (one per line, as for c-import --eval) instead of random ones; "
+                         "the first --inputs of them on which the original completes are used")
     ap.add_argument("--inline", action="store_true",
                     help="compile each function into the timing loop's translation unit (gcc may inline it): "
                          "for functions too small to time through a call; no correctness check in this mode")
     a = ap.parse_args()
-    r = measure(a.original, a.candidate, a.algosearch, a.inputs, min(a.trials, 63), a.seed, a.workdir, a.inline)
+    r = measure(a.original, a.candidate, a.algosearch, a.inputs, min(a.trials, 63), a.seed, a.workdir, a.inline,
+                inputs_file=a.inputs_file)
     print(f"{r['func']}\tref_ns {r['ref_ns']:.2f}\tcand_ns {r['cand_ns']:.2f}\tspeedup {r['speedup']:.3f}"
           f"\tmismatches {r['mismatches']}\tinputs {r['inputs']}\toverhead_ns {r['overhead_ns']:.2f}"
           f"\tby_order {r['order_speedups'][0]:.3f}/{r['order_speedups'][1]:.3f}")

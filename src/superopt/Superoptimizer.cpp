@@ -783,8 +783,13 @@ SuperoptResult Superoptimizer::run() {
         result.best = problem_.referenceProgram().clone();
         result.bestCost = result.referenceCost;
         result.measuredSpeedup = 1.0;
-        const bool exhaustiveOk = abi.kind == CFunctionAbi::Kind::Scalars && abi.params.size() == 1 &&
-                                  cannotFail(problem_.referenceProgram(), 1);
+        // Every unary scalar function gets the compiled check on all 2^32
+        // arguments (log 194: checkint's reference can fail statically, a
+        // variable shift, and a wrong winner went through as `tested`). Where
+        // the reference itself fails (undefined in C), the compiled values
+        // are arbitrary, so a mismatch there does not refute the candidate.
+        const bool exhaustiveOk = abi.kind == CFunctionAbi::Kind::Scalars && abi.params.size() == 1;
+        const bool referenceTotal = cannotFail(problem_.referenceProgram(), 1);
         for (size_t k = 0; k < timed.size() && k < 3; ++k) {
             if (timed[k].speedup <= 1.0 + result.noiseThreshold) break;
             auto src = emit(*timed[k].program);
@@ -799,7 +804,17 @@ SuperoptResult Superoptimizer::run() {
             if (r[1] > 1.0 + result.noiseThreshold && r[1] > result.measuredSpeedup) {
                 if (exhaustiveOk && src) {
                     CompiledTimer::Exhaustive x = timer->exhaustive(*src);
-                    if (x.complete && x.mismatches > 0) {
+                    bool refuted = x.complete && x.mismatches > 0;
+                    if (refuted && !referenceTotal && x.mismatches <= CompiledTimer::maxListed) {
+                        refuted = false;
+                        for (int v : x.bad)
+                            if (problem_.expected({v}).has_value()) {
+                                refuted = true;
+                                x.firstBad = v;
+                                break;
+                            }
+                    }
+                    if (refuted) {
                         ++result.exhaustiveRejected;
                         if (config_.verbose)
                             std::cerr << "exhaustive check refutes a timed winner: " << x.mismatches

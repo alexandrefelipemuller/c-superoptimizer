@@ -338,3 +338,6 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 192b. (results) is_leap 2.7-4.0x proved on all 2^32 arguments; 25 earlier unary gains re-proved | 11_sections_121-125.md | 2247 |
 | 193. (registered) Character literals in the front end; census rerun and superopt on what opens | 11_sections_121-125.md | 2256 |
 | 193. (results) +1 musl (isblank), +1 Lua (digit); isblank 1.20x proved, from codegen (`||` as `+`) | 11_sections_121-125.md | 2262 |
+| 194. (registered) 32-bit `unsigned` in the front end (typed lowering, unsigned compares and `>>`, `u` literals); census and superopt | 11_sections_121-125.md | 2270 |
+| 194. (first run, invalid) Stale ./algosearch (7 samples no output); wrong checkint winner as `tested`; exhaustive gate extended to references that may fail | 11_sections_121-125.md | 2289 |
+| 194. (results) musl 13 → 32 import; 7/18 gain on random ints, isalpha/iscntrl/setup_salt/zeroinfnan hold on realistic workloads; setl-vs-setbe; setup_salt loop rewrite proved | 11_sections_121-125.md | 2297 |

@@ -38,8 +38,10 @@ public:
         bool complete = false;
         long long mismatches = 0;
         int firstBad = 0;
+        std::vector<int> bad;  // the first maxListed mismatching arguments, in order
         std::string error;
     };
+    static constexpr int maxListed = 4096;
     Exhaustive exhaustive(const std::string& candidateSource, int timeoutSeconds = 60) const;
 
     int compilations() const { return compilations_; }

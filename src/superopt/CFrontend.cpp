@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cctype>
 #include <climits>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <regex>
+#include <set>
 #include <sstream>
 
 #include "ast/Expr.hpp"
@@ -23,6 +25,7 @@ struct Token {
     std::string text;
     int line;
     long long value = 0;
+    bool isUnsigned = false;  // a Number of type unsigned int
 };
 
 [[noreturn]] void failAt(int line, const std::string& what) {
@@ -125,13 +128,22 @@ std::vector<Token> lexWith(const std::string& src, Defines& defines) {
             } catch (...) {
                 failAt(line, "bad integer literal " + text);
             }
-            if (used != text.size()) failAt(line, "integer literal suffix not supported: " + text);
-            // INT_MAX + 1 is accepted only so that `-2147483648` can be written;
-            // the parser rejects it anywhere else.
-            if (v > static_cast<unsigned long long>(INT_MAX) + 1)
+            std::string suffix = text.substr(used);
+            if (!suffix.empty() && suffix != "u" && suffix != "U")
+                failAt(line, "integer literal suffix not supported: " + text);
+            // C's literal types, for 32-bit int: a `u` suffix makes it
+            // unsigned; an unsuffixed hex or octal literal that does not fit
+            // in int is unsigned; a decimal one would be long (rejected).
+            bool radix = text.size() > 1 && text[0] == '0';
+            bool isUnsigned = !suffix.empty() || (radix && v > static_cast<unsigned long long>(INT_MAX));
+            if (v > 0xFFFFFFFFull) failAt(line, "integer literal does not fit in 32 bits: " + text);
+            // INT_MAX + 1 (decimal) is accepted only so that `-2147483648` can
+            // be written; the parser rejects it anywhere else.
+            if (!isUnsigned && v > static_cast<unsigned long long>(INT_MAX) + 1)
                 failAt(line, "integer literal does not fit in int: " + text);
             Token t{Tok::Number, text, line};
             t.value = static_cast<long long>(v);
+            t.isUnsigned = isUnsigned;
             out.push_back(t);
             continue;
         }
@@ -195,6 +207,7 @@ std::vector<Token> lexWith(const std::string& src, Defines& defines) {
 struct CExpr {
     std::string op;  // "num", "id", "index", unary "neg" "~" "!", binary C operator, "?:"
     long long value = 0;
+    bool isUnsigned = false;  // "num": the literal's type; "cast": the target type
     std::string name;
     int line = 0;
     std::vector<std::unique_ptr<CExpr>> kids;
@@ -254,6 +267,7 @@ struct Translator {
     CFunctionAbi abi;
     std::string arrayName;  // Array ABI: the pointer parameter
     std::vector<std::map<std::string, int>> scopes;
+    std::set<int> unsignedVars;  // Mini-C variables declared unsigned
     int nextVar = 1;
     // Enclosing loops, innermost last. `continue` is direct in a while loop.
     // In a for loop with a step or a do-while it must still run the step (the
@@ -271,6 +285,8 @@ struct Translator {
     // inlined at each call with their arguments evaluated once, in order.
     struct Helper {
         std::vector<std::string> params;
+        std::vector<bool> paramUnsigned;
+        bool returnsUnsigned = false;
         CExprPtr expr;
         std::string error;  // why it cannot be inlined
     };
@@ -297,25 +313,36 @@ struct Translator {
         return toks[pos++].text;
     }
 
-    // `int`, `const int`, `int32_t`; any other type is rejected.
-    bool atIntType() const {
-        size_t k = 0;
+    // The 32-bit integer types: `int`, `signed`, `int32_t` and `unsigned`,
+    // `unsigned int`, `uint32_t`, each optionally `const`. Any other type is
+    // rejected.
+    bool atIntTypeAt(size_t k) const {
         if (isWord("const", k)) ++k;
-        return isWord("int", k) || isWord("int32_t", k) || isWord("signed", k);
+        return isWord("int", k) || isWord("int32_t", k) || isWord("signed", k) || isWord("unsigned", k) ||
+               isWord("uint32_t", k);
     }
-    void intType() {
+    bool atIntType() const { return atIntTypeAt(0); }
+    // Consumes one of those types; returns whether it is unsigned.
+    bool intType() {
         if (isWord("const")) ++pos;
+        int line = peek().line;
         std::string t = ident();
-        if (t == "signed" && isWord("int")) ++pos;
-        if (t != "int" && t != "int32_t" && t != "signed")
-            failAt(peek().line, "type '" + t + "' not supported (only int)");
+        bool isUnsigned = t == "unsigned" || t == "uint32_t";
+        if (t == "signed" || t == "unsigned") {
+            if (isWord("char") || isWord("short") || isWord("long"))
+                failAt(line, "type '" + t + " " + peek().text + "' not supported (32-bit int and unsigned only)");
+            if (isWord("int")) ++pos;
+        } else if (t != "int" && t != "int32_t" && t != "uint32_t") {
+            failAt(line, "type '" + t + "' not supported (only int and unsigned)");
+        }
         if (isWord("const")) ++pos;
+        return isUnsigned;
     }
     void rejectOtherTypes() {
-        static const char* other[] = {"unsigned", "long",   "short", "char",     "float",    "double", "uint32_t",
-                                      "int64_t",  "uint64_t", "size_t", "_Bool",  "bool",     "struct", "union",
-                                      "enum",     "typedef", "goto",   "switch", "uint8_t",  "int8_t", "int16_t",
-                                      "uint16_t"};
+        static const char* other[] = {"long",    "short",   "char",    "float",  "double", "int64_t",
+                                      "uint64_t", "size_t",  "_Bool",   "bool",   "struct", "union",
+                                      "enum",    "typedef", "goto",    "switch", "uint8_t", "int8_t",
+                                      "int16_t", "uint16_t"};
         if (peek().kind != Tok::Ident) return;
         for (const char* w : other)
             if (peek().text == w) failAt(peek().line, "'" + peek().text + "' not supported in this prototype");
@@ -384,22 +411,22 @@ struct Translator {
         }
         if (isPunct("++") || isPunct("--") || isPunct("*") || isPunct("&"))
             failAt(line, "'" + peek().text + "' inside an expression not supported (side effects / pointers)");
-        // A cast to int is a no-op; any other cast is rejected by intType().
-        if (isPunct("(") && (atIntTypeAt(1))) {
+        // A cast between int and unsigned keeps the bits and changes the type.
+        {
+            size_t k = 1;
+            if (isWord("const", k)) ++k;
+            if (isPunct("(") && (isWord("long", k) || isWord("short", k) || isWord("char", k)))
+                failAt(line, "cast to '" + peek(k).text + "' not supported");
+        }
+        if (isPunct("(") && atIntTypeAt(1)) {
             ++pos;
-            intType();
+            auto e = node("cast", line);
+            e->isUnsigned = intType();
             expect(")");
-            return parseUnary();
+            e->kids.push_back(parseUnary());
+            return e;
         }
         return parsePostfix();
-    }
-
-    bool atIntTypeAt(size_t ahead) const {
-        size_t k = ahead;
-        if (isWord("const", k)) ++k;
-        if (isWord("unsigned", k) || isWord("long", k) || isWord("short", k) || isWord("char", k))
-            failAt(peek().line, "cast to '" + peek(k).text + "' not supported");
-        return isWord("int", k) || isWord("int32_t", k);
     }
 
     CExprPtr parsePostfix() {
@@ -408,6 +435,7 @@ struct Translator {
         if (t.kind == Tok::Number) {
             e = node("num", t.line);
             e->value = t.value;
+            e->isUnsigned = t.isUnsigned;
             ++pos;
         } else if (t.kind == Tok::Ident) {
             e = node("id", t.line);
@@ -454,15 +482,34 @@ struct Translator {
     // Lowers a C expression to a pure Mini-C expression, appending to `pre`
     // the statements that must run first (short-circuit and ?: temporaries).
     ExprPtr lower(const CExpr& e, std::vector<StmtPtr>& pre) {
+        bool isUnsigned = false;
+        return lower(e, pre, isUnsigned);
+    }
+
+    // The same, also giving the expression's C type: int or unsigned (both
+    // 32 bits). Mini-C values are the int with the same bits; the type only
+    // changes ordered comparisons, `>>`, `/` and `%`.
+    ExprPtr lower(const CExpr& e, std::vector<StmtPtr>& pre, bool& isUnsigned) {
+        isUnsigned = false;
         if (e.op == "num") {
-            if (e.value > INT_MAX) failAt(e.line, "integer literal does not fit in int");
-            return makeIntConst(static_cast<int>(e.value));
+            isUnsigned = e.isUnsigned;
+            if (!e.isUnsigned && e.value > INT_MAX) failAt(e.line, "integer literal does not fit in int");
+            return makeIntConst(static_cast<int>(static_cast<uint32_t>(e.value)));
         }
-        if (e.op == "id") return makeVar(lookup(e.name, e.line));
-        if (e.op == "call") return inlineCall(e, pre);
+        if (e.op == "id") {
+            int v = lookup(e.name, e.line);
+            isUnsigned = unsignedVars.count(v) > 0;
+            return makeVar(v);
+        }
+        if (e.op == "call") return inlineCall(e, pre, isUnsigned);
         if (e.op == "index") return makeArrayAccess(lower(*e.kids[0], pre));
-        if (e.op == "neg") return makeBinOp(ExprKind::Sub, makeIntConst(0), lower(*e.kids[0], pre));
-        if (e.op == "~") return makeBinOp(ExprKind::BitXor, lower(*e.kids[0], pre), makeIntConst(-1));
+        if (e.op == "cast") {
+            ExprPtr x = lower(*e.kids[0], pre);
+            isUnsigned = e.isUnsigned;
+            return x;
+        }
+        if (e.op == "neg") return makeBinOp(ExprKind::Sub, makeIntConst(0), lower(*e.kids[0], pre, isUnsigned));
+        if (e.op == "~") return makeBinOp(ExprKind::BitXor, lower(*e.kids[0], pre, isUnsigned), makeIntConst(-1));
         if (e.op == "!") return makeBinOp(ExprKind::Eq, lower(*e.kids[0], pre), makeIntConst(0));
         if (e.op == "&&" || e.op == "||") {
             bool isAnd = e.op == "&&";
@@ -486,21 +533,78 @@ struct Translator {
             ExprPtr c = lower(*e.kids[0], pre);
             int t = newTemp();
             std::vector<StmtPtr> thenBody, elseBody;
-            ExprPtr x = lower(*e.kids[1], thenBody);
+            bool ux = false, uy = false;
+            ExprPtr x = lower(*e.kids[1], thenBody, ux);
             thenBody.push_back(makeAssign(t, std::move(x)));
-            ExprPtr y = lower(*e.kids[2], elseBody);
+            ExprPtr y = lower(*e.kids[2], elseBody, uy);
             elseBody.push_back(makeAssign(t, std::move(y)));
             pre.push_back(makeIf(std::move(c), std::move(thenBody), std::move(elseBody)));
+            isUnsigned = ux || uy;
             return makeVar(t);
         }
-        auto k = binaryKinds().find(e.op);
-        if (k == binaryKinds().end()) failAt(e.line, "operator '" + e.op + "' not supported");
-        ExprPtr a = lower(*e.kids[0], pre);
-        ExprPtr b = lower(*e.kids[1], pre);
-        return makeBinOp(k->second, std::move(a), std::move(b));
+        if (binaryKinds().find(e.op) == binaryKinds().end()) failAt(e.line, "operator '" + e.op + "' not supported");
+        bool ua = false, ub = false;
+        ExprPtr a = lower(*e.kids[0], pre, ua);
+        ExprPtr b = lower(*e.kids[1], pre, ub);
+        return binary(e.op, std::move(a), ua, std::move(b), ub, e.line, pre, isUnsigned);
     }
 
-    ExprPtr inlineCall(const CExpr& e, std::vector<StmtPtr>& pre) {
+    static ExprPtr flipSign(ExprPtr x) {
+        if (x->kind == ExprKind::IntConst) return makeIntConst(x->intValue ^ INT_MIN);
+        return makeBinOp(ExprKind::BitXor, std::move(x), makeIntConst(INT_MIN));
+    }
+
+    // A pure operand used twice: a variable or constant as is, anything else
+    // through a temporary (evaluated once, in order).
+    ExprPtr reusable(ExprPtr x, std::vector<StmtPtr>& pre) {
+        if (x->kind == ExprKind::Var || x->kind == ExprKind::IntConst) return x;
+        int t = newTemp();
+        pre.push_back(makeAssign(t, std::move(x)));
+        return makeVar(t);
+    }
+
+    // `a op b` under C's usual arithmetic conversions for int / unsigned.
+    ExprPtr binary(const std::string& op, ExprPtr a, bool ua, ExprPtr b, bool ub, int line,
+                   std::vector<StmtPtr>& pre, bool& isUnsigned) {
+        ExprKind k = binaryKinds().at(op);
+        bool shift = k == ExprKind::Shl || k == ExprKind::Shr;
+        bool u = shift ? ua : (ua || ub);  // a shift has its left operand's type
+        isUnsigned = u && !isBoolKind(k);
+        if (!u) return makeBinOp(k, std::move(a), std::move(b));
+        switch (k) {
+            case ExprKind::Lt:
+            case ExprKind::Gt:
+            case ExprKind::Le:
+            case ExprKind::Ge:
+                // Unsigned order is signed order with the sign bit flipped.
+                return makeBinOp(k, flipSign(std::move(a)), flipSign(std::move(b)));
+            case ExprKind::Shr: {
+                // Logical shift: the arithmetic one with the copied sign bits
+                // cleared, mask = ~((INT_MIN >> b) << 1). A count outside 0..31
+                // still fails, as it is undefined in C.
+                if (b->kind == ExprKind::IntConst && b->intValue >= 0 && b->intValue < 32) {
+                    int n = b->intValue;
+                    if (n == 0) return a;
+                    int mask = static_cast<int>(0xFFFFFFFFu >> n);
+                    return makeBinOp(ExprKind::BitAnd, makeBinOp(ExprKind::Shr, std::move(a), std::move(b)),
+                                     makeIntConst(mask));
+                }
+                ExprPtr n = reusable(std::move(b), pre);
+                ExprPtr high = makeBinOp(ExprKind::Shl, makeBinOp(ExprKind::Shr, makeIntConst(INT_MIN), n->clone()),
+                                         makeIntConst(1));
+                return makeBinOp(ExprKind::BitAnd, makeBinOp(ExprKind::Shr, std::move(a), std::move(n)),
+                                 makeBinOp(ExprKind::BitXor, std::move(high), makeIntConst(-1)));
+            }
+            case ExprKind::Div:
+            case ExprKind::Mod:
+                failAt(line, "unsigned '" + op + "' not supported yet");
+            default:
+                // + - * << & | ^ == != : the same bits as for int.
+                return makeBinOp(k, std::move(a), std::move(b));
+        }
+    }
+
+    ExprPtr inlineCall(const CExpr& e, std::vector<StmtPtr>& pre, bool& isUnsigned) {
         auto h = helpers.find(e.name);
         if (h == helpers.end()) failAt(e.line, "call to '" + e.name + "': not a function defined in this file");
         if (!h->second.error.empty()) failAt(e.line, "cannot inline '" + e.name + "': " + h->second.error);
@@ -510,13 +614,18 @@ struct Translator {
             failAt(e.line, "'" + e.name + "' takes " + std::to_string(h->second.params.size()) + " arguments");
         std::map<std::string, int> bound;
         for (size_t k = 0; k < e.kids.size(); ++k) {
-            ExprPtr v = lower(*e.kids[k], pre);
+            bool argUnsigned = false;
+            ExprPtr v = lower(*e.kids[k], pre, argUnsigned);
+            bool paramUnsigned = h->second.paramUnsigned[k];
             int t;
-            if (v->kind == ExprKind::Var) {
-                t = v->varIndex;  // temporaries never write user variables
+            // An argument variable is used directly (temporaries never write
+            // user variables) when it already has the parameter's type.
+            if (v->kind == ExprKind::Var && argUnsigned == paramUnsigned) {
+                t = v->varIndex;
             } else {
                 t = newTemp();
                 pre.push_back(makeAssign(t, std::move(v)));
+                if (paramUnsigned) unsignedVars.insert(t);
             }
             bound[h->second.params[k]] = t;
         }
@@ -526,6 +635,7 @@ struct Translator {
         ExprPtr r = lower(*h->second.expr, pre);
         inlining.pop_back();
         scopes = std::move(saved);
+        isUnsigned = h->second.returnsUnsigned;  // converted to the return type: same bits
         return r;
     }
 
@@ -536,6 +646,7 @@ struct Translator {
     std::vector<StmtPtr> loopBody(bool direct) {
         size_t save = pos;
         int saveVar = nextVar;
+        std::set<int> saveUnsigned = unsignedVars;
         loops.push_back({direct});
         auto b = body();
         LoopCtx c = loops.back();
@@ -543,6 +654,7 @@ struct Translator {
         if (!c.needsWrap) return b;
         pos = save;
         nextVar = saveVar;
+        unsignedVars = saveUnsigned;
         int flag = newTemp();
         loops.push_back({false, true, flag});
         b = body();
@@ -624,8 +736,9 @@ struct Translator {
             if (isPunct("=")) failAt(line, "chained assignment not supported");
         } else {
             ExprPtr cur = index ? makeArrayAccess(ix->clone()) : makeVar(var);
-            ExprPtr operand = increment ? makeIntConst(1) : lower(*parseExpr(), pre);
-            value = makeBinOp(binaryKinds().at(op), std::move(cur), std::move(operand));
+            bool curUnsigned = !index && unsignedVars.count(var) > 0, operandUnsigned = false, unused = false;
+            ExprPtr operand = increment ? makeIntConst(1) : lower(*parseExpr(), pre, operandUnsigned);
+            value = binary(op, std::move(cur), curUnsigned, std::move(operand), operandUnsigned, line, pre, unused);
         }
         appendAll(out, pre);
         if (index) {
@@ -636,13 +749,14 @@ struct Translator {
     }
 
     void declaration(std::vector<StmtPtr>& out) {
-        intType();
+        bool isUnsigned = intType();
         for (;;) {
             int line = peek().line;
             if (isPunct("*")) failAt(line, "local pointers not supported");
             std::string name = ident();
             if (isPunct("[")) failAt(line, "local arrays not supported");
             int v = nextVar++;
+            if (isUnsigned) unsignedVars.insert(v);
             if (eat("=")) {
                 std::vector<StmtPtr> pre;
                 ExprPtr init = lower(*parseExpr(), pre);
@@ -834,14 +948,14 @@ struct Translator {
             pos = d.start;
             while (isWord("static") || isWord("inline")) ++pos;
             if (isWord("void")) failAt(peek().line, "a void helper has no value to inline");
-            intType();
+            h.returnsUnsigned = intType();
             ident();
             expect("(");
             if (isWord("void") && isPunct(")", 1)) ++pos;
             while (!eat(")")) {
                 if (!h.params.empty()) expect(",");
                 rejectOtherTypes();
-                intType();
+                h.paramUnsigned.push_back(intType());
                 if (isPunct("*") || isPunct("[", 1)) failAt(peek().line, "helpers take int scalars only");
                 h.params.push_back(ident());
             }
@@ -864,9 +978,12 @@ struct Translator {
             size_t start = pos;
             while (isWord("static") || isWord("inline")) ++pos;
             rejectOtherTypes();
-            if (!(isWord("int") || isWord("int32_t") || isWord("void")))
+            if (isWord("void"))
+                ++pos;
+            else if (atIntType())
+                intType();
+            else
                 failAt(peek().line, "expected a function definition, found '" + peek().text + "'");
-            ++pos;
             std::string name = ident();
             if (!isPunct("(")) failAt(peek().line, "only function definitions are supported at top level");
             int depth = 0;
@@ -893,13 +1010,17 @@ struct Translator {
     std::vector<StmtPtr> signature() {
         while (isWord("static") || isWord("inline")) ++pos;
         abi.returnsValue = !isWord("void");
-        ++pos;
+        if (abi.returnsValue)
+            abi.returnsUnsigned = intType();
+        else
+            ++pos;
         abi.name = ident();
         expect("(");
         struct Param {
             std::string name;
             bool pointer;
             int line;
+            bool isUnsigned;
         };
         std::vector<Param> params;
         if (isWord("void") && isPunct(")", 1)) ++pos;
@@ -907,10 +1028,11 @@ struct Translator {
             if (!params.empty()) expect(",");
             int line = peek().line;
             rejectOtherTypes();
-            intType();
+            bool isUnsigned = intType();
             bool pointer = eat("*");
             if (pointer && isWord("const")) ++pos;
-            Param p{ident(), pointer, line};
+            if (pointer && isUnsigned) failAt(line, "the array parameter must be int *");
+            Param p{ident(), pointer, line, isUnsigned};
             if (eat("[")) {
                 expect("]");
                 p.pointer = true;
@@ -927,6 +1049,7 @@ struct Translator {
             abi.kind = CFunctionAbi::Kind::Array;
             arrayName = params[0].name;
             scopes.back()[params[1].name] = 0;
+            if (params[1].isUnsigned) unsignedVars.insert(0);
         } else {
             if (params.empty()) failAt(peek().line, "functions without parameters not supported");
             if (!abi.returnsValue) failAt(peek().line, "a void function of scalars has no observable result");
@@ -934,10 +1057,14 @@ struct Translator {
             for (size_t i = 0; i < params.size(); ++i) {
                 int v = nextVar++;
                 scopes.back()[params[i].name] = v;
+                if (params[i].isUnsigned) unsignedVars.insert(v);
                 prologue.push_back(makeAssign(v, makeArrayAccess(makeIntConst(static_cast<int>(i)))));
             }
         }
-        for (const auto& p : params) abi.params.push_back(p.name);
+        for (const auto& p : params) {
+            abi.params.push_back(p.name);
+            abi.paramUnsigned.push_back(p.isUnsigned);
+        }
         return prologue;
     }
 };
@@ -1184,6 +1311,7 @@ CImport importCFunction(const std::string& source, const std::string& funcName) 
     if (t.abi.kind == CFunctionAbi::Kind::Array && writesVar(*program, 0)) {
         int copy = t.nextVar++;
         renameVar(*program, 0, copy);
+        if (t.unsignedVars.count(0)) t.unsignedVars.insert(copy);
         program->body.insert(program->body.begin(), makeAssign(copy, makeVar(0)));
     }
     t.abi.numVars = std::max(t.nextVar, maxVar(*program) + 1);
@@ -1200,9 +1328,12 @@ std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
     Emitter em(abi);
     std::ostringstream& out = em.out;
     out << "/* Generated by algosearch from Mini-C; compile with -fwrapv. */\n";
-    out << (abi.returnsValue ? "int " : "void ") << abi.name << "(";
+    // The original's signature; inside, every value is an int with the same
+    // bits (gcc converts unsigned <-> int modulo 2^32).
+    auto type = [&](size_t i) { return i < abi.paramUnsigned.size() && abi.paramUnsigned[i] ? "unsigned " : "int "; };
+    out << (!abi.returnsValue ? "void " : abi.returnsUnsigned ? "unsigned " : "int ") << abi.name << "(";
     if (abi.kind == CFunctionAbi::Kind::Array) {
-        out << "int *" << names[0] << ", int " << names[1] << ") {\n";
+        out << "int *" << names[0] << ", " << type(1) << names[1] << ") {\n";
         out << "    int v0 = " << names[1] << ";\n";
         em.arrName = names[0];
         if (abi.returnsValue) {
@@ -1217,7 +1348,7 @@ std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
             }
         }
     } else {
-        for (size_t i = 0; i < names.size(); ++i) out << (i ? ", " : "") << "int " << names[i];
+        for (size_t i = 0; i < names.size(); ++i) out << (i ? ", " : "") << type(i) << names[i];
         out << ") {\n";
         out << "    int arr[" << names.size() << "] = {";
         for (size_t i = 0; i < names.size(); ++i) out << (i ? ", " : "") << names[i];

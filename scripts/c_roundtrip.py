@@ -106,7 +106,9 @@ def linkable(src, func, out):
     another translation unit can call it (real code, log 192: static helpers
     such as musl's is_leap)."""
     text = open(src).read()
-    text = re.sub(rf"\bstatic\s+((?:inline\s+)?(?:int|void)\s+{func}\s*\()", r"\1", text)
+    # `inline` goes too: a plain C99 `inline` definition emits no symbol.
+    text = re.sub(rf"\bstatic\s+(?:inline\s+)?((?:(?:unsigned\s+)?int|unsigned|uint32_t|int32_t|void)\s+{func}\s*\()",
+                  r"\1", text)
     with open(out, "w") as f:
         f.write(text)
     return out

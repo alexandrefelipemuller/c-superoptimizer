@@ -1,4 +1,5 @@
 #include <climits>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -145,7 +146,6 @@ TEST(c_import_do_while_and_break) {
 }
 
 TEST(c_import_rejects_constructs_outside_the_subset) {
-    CHECK(rejects("unsigned f(unsigned x) { return x; }"));
     CHECK(rejects("int f(int x) { return g(x); }"));
     CHECK(rejects("int f(int *a, int n) { return *a; }"));
     CHECK(rejects("int f(int x) { int y = x++; return y; }"));
@@ -208,6 +208,62 @@ TEST(c_import_character_literals_are_int_constants) {
     CHECK(rejects("int f(int c) { return c == 'ab'; }"));
     CHECK(rejects("int f(int c) { return c == ''; }"));
     CHECK(rejects("int f(int c) { return c == '\\q'; }"));
+}
+
+TEST(c_import_unsigned_compares_shifts_literals_and_helpers) {
+    using U = unsigned;
+    static const auto I = [](U v) { return static_cast<int>(v); };
+    struct Case {
+        const char* src;
+        std::function<int(int, int)> native;  // on the int bits of the arguments
+    };
+    std::vector<Case> cases = {
+        {"int f(int c, int d) { return (unsigned)c - 'a' < 26; }", [](int c, int) { return U(c) - 'a' < 26u; }},
+        {"unsigned f(unsigned x, int k) { return (x >> 3) + (x >> 31) + (x << 4) + (x >> (k & 31)); }",
+         [&](int x, int k) { return I((U(x) >> 3) + (U(x) >> 31) + (U(x) << 4) + (U(x) >> (k & 31))); }},
+        {"int f(int a, unsigned b) { return a < b ? 1 : a > b ? 2 : a <= b ? 3 : 4; }",
+         [](int a, int b) { return U(a) < U(b) ? 1 : U(a) > U(b) ? 2 : 3; }},
+        {"unsigned f(unsigned x, int y) { unsigned n = 0; while (x) { n += x & 1; x >>= 1; } return n; }",
+         [](int x, int) { return __builtin_popcount(U(x)); }},
+        {"int f(int x, int y) { return x > 0xFFFFFFF0 ? 1 : (x + 10u < 20u) + (y >= 0x80000000); }",
+         [](int x, int y) { return U(x) > 0xFFFFFFF0u ? 1 : int(U(x) + 10u < 20u) + int(U(y) >= 0x80000000u); }},
+        {"int f(int a, unsigned b) { return (a ? b : 0) > 5; }", [](int a, int b) { return (a ? U(b) : 0u) > 5u; }},
+        {"int f(unsigned x, unsigned y) { return (int)x < 0 ? (int)y >> 1 : (int)x < (int)y; }",
+         [](int x, int y) { return x < 0 ? y >> 1 : x < y; }},
+        {"static unsigned g(unsigned v) { return v >> 1; }\nint f(int x, int y) { return g(x) > 3 && y < 2; }",
+         [](int x, int y) { return (U(x) >> 1) > 3u && y < 2; }},
+        {"uint32_t f(uint32_t x, unsigned int y) { for (int i = 0; i < 2; i++) { if (x >= y) break; x = x * 3u; } "
+         "return x; }",
+         [&](int x, int y) {
+             U v = U(x);
+             for (int i = 0; i < 2 && v < U(y); i++) v *= 3u;
+             return I(v);
+         }},
+    };
+    std::vector<int> values = scalarValues;
+    for (int v : {97, 122, 123, 96, 5, 6, 17, 31, 32, -16, -15, -20, -2}) values.push_back(v);
+    for (const auto& c : cases) {
+        CImport imp = importCFunction(c.src);
+        for (int x : values)
+            for (int y : values) {
+                bool ok = false;
+                auto r = runImport(imp, {x, y}, ok);
+                CHECK(ok);
+                if (ok) CHECK_EQ(r[0], c.native(x, y));
+            }
+    }
+    // A variable shift count outside 0..31 is undefined in C: a run-time error, as for int.
+    CImport shift = importCFunction("unsigned f(unsigned x, int k) { return x >> k; }");
+    bool ok = true;
+    runImport(shift, {-1, 32}, ok);
+    CHECK(!ok);
+    CHECK(rejects("unsigned f(unsigned x) { return x / 3; }"));  // unsigned division: not yet
+    CHECK(rejects("int f(int x) { unsigned y = x; return y % 3; }"));
+    CHECK(rejects("int f(int x) { unsigned char y = x; return y; }"));
+    CHECK(rejects("int f(int x) { return (unsigned long)x; }"));
+    CHECK(rejects("int f(unsigned *a, int n) { return a[0]; }"));
+    CHECK(rejects("int f(int x) { return x + 1UL; }"));
+    CHECK(rejects("int f(int x) { return x < 3000000000; }"));  // a long in C
 }
 
 TEST(c_import_inlines_single_return_helpers_once_per_argument) {

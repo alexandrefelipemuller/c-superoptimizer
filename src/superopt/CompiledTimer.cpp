@@ -1,5 +1,6 @@
 #include "superopt/CompiledTimer.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -76,7 +77,7 @@ std::string replaceAll(std::string s, const std::string& from, const std::string
 // an original with helpers can be timed against itself in one unit); the
 // timed function becomes `<prefix>fn`.
 std::string prefixFunctions(const std::string& src, const std::string& prefix, const std::string& target) {
-    static const std::regex def("\\b(?:int|void|int32_t)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
+    static const std::regex def("\\b(?:int|void|int32_t|unsigned|uint32_t)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
     std::string out = src;
     for (auto it = std::sregex_iterator(src.begin(), src.end(), def); it != std::sregex_iterator(); ++it) {
         std::string name = (*it)[1].str();
@@ -159,10 +160,13 @@ CompiledTimer::Exhaustive CompiledTimer::exhaustive(const std::string& candidate
     std::string src = "#include <stdio.h>\n" + prefixFunctions(originalSource_, "ref_", abi_.name) + "\n" +
                       prefixFunctions(candidateSource, "cand_", abi_.name) +
                       "\nint main(void) {\n"
-                      "    long long bad = 0; int first = 0;\n"
+                      "    long long bad = 0; static int list[" + std::to_string(maxListed) + "];\n"
                       "    for (long long y = -2147483648LL; y <= 2147483647LL; y++)\n"
-                      "        if (ref_fn((int)y) != cand_fn((int)y)) { if (!bad) first = (int)y; bad++; }\n"
-                      "    printf(\"%lld %d\\n\", bad, first);\n"
+                      "        if (ref_fn((int)y) != cand_fn((int)y)) { if (bad < " + std::to_string(maxListed) +
+                      ") list[bad] = (int)y; bad++; }\n"
+                      "    printf(\"%lld\\n\", bad);\n"
+                      "    for (long long k = 0; k < bad && k < " + std::to_string(maxListed) +
+                      "; k++) printf(\"%d\\n\", list[k]);\n"
                       "    return 0;\n}\n";
     std::string base = workDir_ + "/x" + std::to_string(compilations_++);
     {
@@ -176,7 +180,18 @@ CompiledTimer::Exhaustive CompiledTimer::exhaustive(const std::string& candidate
     std::string cmd = "timeout " + std::to_string(timeoutSeconds) + " '" + base + "'";
     FILE* p = popen(cmd.c_str(), "r");
     if (p) {
-        if (std::fscanf(p, "%lld %d", &x.mismatches, &x.firstBad) == 2) x.complete = true;
+        if (std::fscanf(p, "%lld", &x.mismatches) == 1) {
+            x.complete = true;
+            int v = 0;
+            while (static_cast<long long>(x.bad.size()) < std::min<long long>(x.mismatches, maxListed)) {
+                if (std::fscanf(p, "%d", &v) != 1) {
+                    x.complete = false;
+                    break;
+                }
+                x.bad.push_back(v);
+            }
+            if (!x.bad.empty()) x.firstBad = x.bad[0];
+        }
         if (pclose(p) != 0) x.complete = false;
     }
     if (!x.complete) x.error = "did not finish in " + std::to_string(timeoutSeconds) + " s";
