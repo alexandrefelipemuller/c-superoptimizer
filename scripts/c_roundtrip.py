@@ -101,17 +101,34 @@ def harness_source(abi, returns, params):
 
 
 
-def linkable(src, func, out):
+def linkable(src, func, out, new, signature=None):
     """A copy of `src` whose target function is not static, so a harness in
     another translation unit can call it (real code, log 192: static helpers
-    such as musl's is_leap)."""
+    such as musl's is_leap). Returns it and the gcc flags that rename the
+    target to `new`.
+
+    `signature` = (abi, returns, params) for a function with char/short in its
+    signature (log 197): the harness calls it as `int new(int, ...)`, which
+    leaves the upper result bits undefined, so the target becomes `new_typed`
+    and a wrapper `new` with the int signature calls it with C's conversions."""
     text = open(src).read()
     # `inline` goes too: a plain C99 `inline` definition emits no symbol.
     text = re.sub(rf"\bstatic\s+(?:inline\s+)?((?:(?:unsigned\s+)?int|unsigned|uint32_t|int32_t|void)\s+{func}\s*\()",
                   r"\1", text)
+    flags = [f"-D{func}={new}"]
+    if signature:
+        abi, returns, params = signature
+        if abi == "scalars":
+            ps = ", ".join(f"int a{i}" for i in range(params))
+            text += f"\nint {new}({ps}) {{ return {func}(" + ", ".join(f"a{i}" for i in range(params)) + "); }\n"
+        elif returns == "int":
+            text += f"\nint {new}(int *a, int n) {{ return {func}(a, n); }}\n"
+        else:
+            text += f"\nvoid {new}(int *a, int n) {{ {func}(a, n); }}\n"
+        flags = [f"-D{func}={new}_typed"]
     with open(out, "w") as f:
         f.write(text)
-    return out
+    return out, flags
 
 def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
@@ -123,6 +140,7 @@ def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout
     if head.returncode != 0:
         return False, f"import failed: {head.stderr.strip()}"
     m = re.match(r"// (\w+): abi=(\w+) returns=(\w+) params=(\d+)", head.stdout)
+    narrow = " narrow=1" in head.stdout.splitlines()[0]
     func, abi, returns, params = m.group(1), m.group(2), m.group(3), int(m.group(4))
     if candidate:
         with open(candidate) as f:
@@ -140,8 +158,9 @@ def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout
         f.write(harness_source(abi, returns, params))
     cc = ["gcc", "-O2", "-fwrapv", "-w"]
     for src, obj, new in ((path, "ref.o", "ref_fn"), (os.path.join(d, "emitted.c"), "emit.o", "emit_fn")):
-        src = linkable(src, func, os.path.join(d, new + "_src.c"))
-        r = run(cc + [f"-D{func}={new}", "-c", src, "-o", os.path.join(d, obj)])
+        src, flags = linkable(src, func, os.path.join(d, new + "_src.c"), new,
+                              (abi, returns, params) if narrow else None)
+        r = run(cc + flags + ["-c", src, "-o", os.path.join(d, obj)])
         if r.returncode != 0:
             return False, f"gcc failed on {src}: {r.stderr.strip()[:400]}"
     r = run(cc + [os.path.join(d, "harness.c"), os.path.join(d, "ref.o"), os.path.join(d, "emit.o"),

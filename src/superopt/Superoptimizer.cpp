@@ -600,7 +600,7 @@ SuperoptResult Superoptimizer::run() {
     result.trajectory.push_back({0.0, bestCost});
 
     // Phase 3b: compiled timing against the original, in one process.
-    std::unique_ptr<CompiledTimer> timer;
+    std::unique_ptr<CompiledTimer> timer, confirmTimer;
     std::vector<Timed> timed;
     std::unordered_set<std::string> timedKeys;
     auto emit = [&](const Stmt& p) -> std::optional<std::string> {
@@ -614,40 +614,61 @@ SuperoptResult Superoptimizer::run() {
         // Section 190: the compiled workload is its own, larger set. With the 24
         // cost inputs repeated, the branch predictor memorizes their branches and
         // a branchy candidate times faster than it runs on fresh data.
-        std::vector<std::vector<int>> timing;
-        Random trng(config_.seed ^ 0x2545f4914f6cdd1dULL);
+        //
+        // Log 197: the search times hundreds of candidates on one fixed input
+        // sequence, and the fastest of them can be fast on that sequence only
+        // (a branch the predictor learned on it: 1.53x there, 0.57x on other
+        // inputs of the same kind). The final winners are therefore confirmed
+        // on inputs the search never timed: the other half of the user's
+        // workload (alternate inputs), or a second random set.
+        std::vector<std::vector<int>> timing, confirm;
+        const size_t cap = static_cast<size_t>(config_.timingInputs);
+        for (size_t i = 0; i < userWorkload_.size(); ++i) {
+            auto& part = (i % 2 == 0 || userWorkload_.size() == 1) ? timing : confirm;
+            if (part.size() < cap) part.push_back(userWorkload_[i]);
+        }
+        if (userWorkload_.size() == 1) confirm = timing;
         bool scalarAbi = abi.kind == CFunctionAbi::Kind::Scalars;
-        for (size_t i = 0; i < userWorkload_.size() && timing.size() < static_cast<size_t>(config_.timingInputs); ++i)
-            timing.push_back(userWorkload_[i]);
-        for (int tries = 0; userWorkload_.empty() && timing.size() < static_cast<size_t>(config_.timingInputs) &&
-                            tries < 20 * config_.timingInputs;
-             ++tries) {
-            std::vector<int> in;
-            if (scalarAbi) {
-                in = randomInput(trng, abi, 0);
-            } else {
-                in.resize(static_cast<size_t>(trng.uniformInt(16, 64)));
-                for (auto& x : in) x = trng.uniformInt(-50, 50);
+        auto randomSet = [&](uint64_t salt, std::vector<std::vector<int>>& set) {
+            Random trng(config_.seed ^ salt);
+            for (int tries = 0; set.size() < cap && tries < 20 * config_.timingInputs; ++tries) {
+                std::vector<int> in;
+                if (scalarAbi) {
+                    in = randomInput(trng, abi, 0);
+                } else {
+                    in.resize(static_cast<size_t>(trng.uniformInt(16, 64)));
+                    for (auto& x : in) x = trng.uniformInt(-50, 50);
+                }
+                if (problem_.expected(in)) set.push_back(std::move(in));
             }
-            if (problem_.expected(in)) timing.push_back(std::move(in));
+        };
+        if (userWorkload_.empty()) {
+            randomSet(0x2545f4914f6cdd1dULL, timing);
+            randomSet(0x9e3779b97f4a7c15ULL, confirm);
         }
         timer = std::make_unique<CompiledTimer>(config_.originalSource, abi, timing, config_.workDir);
+        confirmTimer = std::make_unique<CompiledTimer>(config_.originalSource, abi, confirm, config_.workDir + "/confirm");
+        // Noise: the original against itself, on both input sets.
         double spread = 0;
-        std::vector<double> self;
-        for (int i = 0; i < 3; ++i) {
-            CompiledTimer::Timing t = timer->time(config_.originalSource);
-            if (!t.ok) throw CImportError("compiled timing failed: " + t.error);
-            self.push_back(t.speedup);
-            spread = std::max(spread, std::abs(1.0 - t.speedup));
-        }
-        std::sort(self.begin(), self.end());
-        result.selfControl = self[1];
+        auto selfControl = [&](CompiledTimer& tm) {
+            std::vector<double> self;
+            for (int i = 0; i < 3; ++i) {
+                CompiledTimer::Timing t = tm.time(config_.originalSource);
+                if (!t.ok) throw CImportError("compiled timing failed: " + t.error);
+                self.push_back(t.speedup);
+                spread = std::max(spread, std::abs(1.0 - t.speedup));
+            }
+            std::sort(self.begin(), self.end());
+            return self[1];
+        };
+        result.selfControl = selfControl(*timer);
+        result.confirmSelfControl = selfControl(*confirmTimer);
         result.noiseThreshold = std::max(0.03, 2.0 * spread);
         if (auto c = emit(problem_.referenceProgram())) {
             CompiledTimer::Timing t = timer->time(*c);
             if (t.ok) result.emittedReference = t.speedup;
         }
-        result.timings = 4;
+        result.timings = 7;
     }
     // Times up to timeTopK untimed correct candidates of the beam: the
     // model's best, mutants of measured-fast parents, then random ones (the
@@ -795,9 +816,10 @@ SuperoptResult Superoptimizer::run() {
     result.modelBest = result.best->clone();
     result.modelBestCost = result.bestCost;
     if (timer) {
-        // Re-measure the fastest few (3 runs of 21 trials each, median) and
-        // keep one only if it beats the noise threshold; otherwise the answer
-        // is "no measured gain": the reference.
+        // Re-measure the fastest few (3 runs of 21 trials each, median) on the
+        // confirmation inputs and keep one only if it beats the noise
+        // threshold there; otherwise the answer is "no measured gain": the
+        // reference.
         result.best = problem_.referenceProgram().clone();
         result.bestCost = result.referenceCost;
         result.measuredSpeedup = 1.0;
@@ -813,7 +835,7 @@ SuperoptResult Superoptimizer::run() {
             auto src = emit(*timed[k].program);
             std::vector<double> r;
             for (int rep = 0; rep < 3 && src; ++rep) {
-                CompiledTimer::Timing t = timer->time(*src, 21);
+                CompiledTimer::Timing t = confirmTimer->time(*src, 21);
                 ++result.timings;
                 if (t.ok) r.push_back(t.speedup);
             }

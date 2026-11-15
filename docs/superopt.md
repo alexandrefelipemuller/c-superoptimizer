@@ -19,7 +19,7 @@ Interface gaps (planned 2026-11-13), and their status:
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
 | 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs |
 | 4 | larger functions and real code, in small steps. 4a: constant `#define`, `INT_MAX`/`INT_MIN`, inlined `return expr;` helpers, `continue` in any loop, target picked automatically | 4a done (log 191): 8 real-style samples import exactly; 1 gain of 6 measurable; no gain returns the original text |
-| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194) |
+| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197) |
 | 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | started (log 192): boundary inputs in CEGIS; unary total functions checked on all 2^32 arguments compiled |
 | 6 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -76,6 +76,11 @@ Since phase 4a (log 191):
 - Character literals (log 193) are int constants: one ASCII character or
   escape (`\n`, `\0`, `\'`, octal, `\xHH`). Values above 127 are rejected,
   since their value depends on whether `char` is signed.
+- `char`, `short`, signed or unsigned, and the 8/16-bit <stdint.h> names
+  (log 197): values promote to int in expressions and are truncated on
+  storage (variables, parameters, results, casts). Pointers to them
+  (`char *`) are still rejected. `c-import` prints `narrow=1`, and the
+  scripts then call the function through a typed wrapper.
 - 32-bit `unsigned` (log 194): `unsigned`, `unsigned int`, `uint32_t` and
   casts between them and int, typed by C's usual arithmetic conversions. The
   Mini-C value is the int with the same bits. Ordered comparisons become
@@ -236,6 +241,14 @@ checked on all inputs. The result is tuned to that workload by design: on
 text, isspace gains 2.3-2.5x with `if (c >= 33) return 0;` first, which
 would cost on whitespace-heavy input. Without a workload, character functions
 picked candidates that regressed on characters, down to 0.23x (hexval).
+
+Confirmation (log 197): the search times its candidates on one fixed input
+sequence, and the fastest of hundreds can be fast on that sequence only (a
+branch the predictor happened to learn: 1.53x there, 0.57x on other inputs
+of the same kind). So the workload is split into alternate inputs. The loop
+times on one half, and the final top three are re-measured on the other half
+before one is accepted. Without `--workload` the second half is a second
+random set.
 
 ### Equivalence levels (log 192)
 

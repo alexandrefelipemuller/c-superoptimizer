@@ -345,3 +345,7 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 195. (results) WL vs RAND on held-out character inputs: regressions gone (hexval 0.23x, isspace 0.78x), isspace 2.3-2.5x tuned to text; 4 vs 3 gaining samples | 11_sections_121-125.md | 2329 |
 | 196. (registered) Unsigned `/` and `%` via signed division (Hacker's Delight 9-3) | 11_sections_121-125.md | 2345 |
 | 196. (results) Correct (native test, round trip) but opens no new real function: census unchanged (musl 32, Lua 2) | 11_sections_121-125.md | 2357 |
+| 197. (registered) `char`/`short` scalars (truncate on storage, promote in expressions), typed wrappers in the scripts | 11_sections_121-125.md | 2362 |
+| 197. (results) musl 32 → 33 (pointer `char *` is the real gate); ascii_is_unsafe seed 11 won on the search's input sequence only (1.53x there, 0.57x held-out) → confirmation inputs | 11_sections_121-125.md | 2370 |
+| 197b. (registered) Rerun with the confirmation split | 11_sections_121-125.md | 2382 |
+| 197b. (results) No lucky winner (ascii_is_unsafe → reference); isalpha/iscntrl/isspace/ascii_to_bin keep 1.11-3.71x held-out | 11_sections_121-125.md | 2389 |

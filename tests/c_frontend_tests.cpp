@@ -257,7 +257,6 @@ TEST(c_import_unsigned_compares_shifts_literals_and_helpers) {
     bool ok = true;
     runImport(shift, {-1, 32}, ok);
     CHECK(!ok);
-    CHECK(rejects("int f(int x) { unsigned char y = x; return y; }"));
     CHECK(rejects("int f(int x) { return (unsigned long)x; }"));
     CHECK(rejects("int f(unsigned *a, int n) { return a[0]; }"));
     CHECK(rejects("int f(int x) { return x + 1UL; }"));
@@ -313,6 +312,62 @@ TEST(c_import_unsigned_division_and_remainder_match_native) {
                 if (ok) CHECK_EQ(r[0], static_cast<int>(c.native(U(x), U(y))));
             }
     }
+}
+
+TEST(c_import_char_and_short_truncate_on_storage_and_promote_in_expressions) {
+    using U = unsigned;
+    struct Case {
+        const char* src;
+        std::function<int(int, int)> native;  // C semantics on the int arguments (gcc: char is signed)
+    };
+    std::vector<Case> cases = {
+        {"char f(char c, int k) { return c + k; }",
+         [](int c, int k) { return int(static_cast<signed char>(static_cast<signed char>(c) + k)); }},
+        {"unsigned char f(unsigned char c, int k) { c += k; return c; }",
+         [](int c, int k) { return int(static_cast<unsigned char>(static_cast<unsigned char>(c) + k)); }},
+        {"int f(int x, int y) { short s = x; unsigned short u = y; return s * 3 + u - (signed char)x + (uint8_t)y; }",
+         [](int x, int y) {
+             return int(static_cast<short>(x)) * 3 + int(static_cast<unsigned short>(y)) -
+                    int(static_cast<signed char>(x)) + int(static_cast<unsigned char>(y));
+         }},
+        {"int f(int x, int y) { unsigned char h = 0; for (int i = 0; i < 4; i++) { h = h * 31 + (x >> (8 * i)); } "
+         "return h; }",
+         [](int x, int) {
+             unsigned char h = 0;
+             for (int i = 0; i < 4; i++) h = static_cast<unsigned char>(h * 31 + (x >> (8 * i)));
+             return int(h);
+         }},
+        {"static int lower(unsigned char c) { return c - 'A' < 26u ? c + 32 : c; }\nint f(int c, int d) { return lower(c) + d; }",
+         [](int c, int d) {
+             unsigned char b = static_cast<unsigned char>(c);
+             return (U(b) - 'A' < 26u ? b + 32 : b) + d;
+         }},
+        {"int16_t f(int16_t a, int8_t b) { int16_t r = a; r <<= 4; return r + b; }",
+         [](int a, int b) {
+             int16_t r = static_cast<int16_t>(a);
+             r = static_cast<int16_t>(r << 4);
+             return int(static_cast<int16_t>(r + static_cast<int8_t>(b)));
+         }},
+        {"int f(int c, int d) { char x = c; x++; return x < 0; }",
+         [](int c, int) { return int(static_cast<signed char>(static_cast<signed char>(c) + 1) < 0); }},
+    };
+    std::vector<int> values = scalarValues;
+    for (int v : std::vector<int>{127, 128, 255, 256, -128, -129, 32767, 32768, 65535, 65536, 0x1234, -300, 'A', 'Z', 'a'})
+        values.push_back(v);
+    for (const auto& c : cases) {
+        CImport imp = importCFunction(c.src);
+        for (int x : values)
+            for (int y : values) {
+                bool ok = false;
+                auto r = runImport(imp, {x, y}, ok);
+                CHECK(ok);
+                if (ok) CHECK_EQ(r[0], c.native(x, y));
+            }
+    }
+    CHECK(rejects("int f(char *s, int n) { return s[0]; }"));  // only int arrays
+    CHECK(rejects("int f(int *a, char n) { return a[0]; }"));
+    CHECK(rejects("int f(int x) { long y = x; return y; }"));
+    CHECK(rejects("int f(int x) { return (unsigned long)x; }"));
 }
 
 TEST(c_import_inlines_single_return_helpers_once_per_argument) {

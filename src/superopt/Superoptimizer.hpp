@@ -65,6 +65,7 @@ struct SuperoptResult {
     int timings = 0;
     double noiseThreshold = 0;     // a speedup must exceed 1 + this to count
     double selfControl = 1.0;      // original against itself, median of 3
+    double confirmSelfControl = 1.0;  // the same on the confirmation inputs (log 197)
     double emittedReference = 1.0; // the imported reference, emitted, against the original
     double measuredSpeedup = 1.0;  // of `best`, re-measured; 1.0 when best is the reference
     double timingSeconds = 0;

@@ -217,17 +217,34 @@ def gen_inputs(abi, params, n, rng):
 
 
 
-def linkable(src, func, out):
+def linkable(src, func, out, new, signature=None):
     """A copy of `src` whose target function is not static, so a harness in
     another translation unit can call it (real code, log 192: static helpers
-    such as musl's is_leap)."""
+    such as musl's is_leap). Returns it and the gcc flags that rename the
+    target to `new`.
+
+    `signature` = (abi, returns, params) for a function with char/short in its
+    signature (log 197): the harness calls it as `int new(int, ...)`, which
+    leaves the upper result bits undefined, so the target becomes `new_typed`
+    and a wrapper `new` with the int signature calls it with C's conversions."""
     text = open(src).read()
     # `inline` goes too: a plain C99 `inline` definition emits no symbol.
     text = re.sub(rf"\bstatic\s+(?:inline\s+)?((?:(?:unsigned\s+)?int|unsigned|uint32_t|int32_t|void)\s+{func}\s*\()",
                   r"\1", text)
+    flags = [f"-D{func}={new}"]
+    if signature:
+        abi, returns, params = signature
+        if abi == "scalars":
+            ps = ", ".join(f"int a{i}" for i in range(params))
+            text += f"\nint {new}({ps}) {{ return {func}(" + ", ".join(f"a{i}" for i in range(params)) + "); }\n"
+        elif returns == "int":
+            text += f"\nint {new}(int *a, int n) {{ return {func}(a, n); }}\n"
+        else:
+            text += f"\nvoid {new}(int *a, int n) {{ {func}(a, n); }}\n"
+        flags = [f"-D{func}={new}_typed"]
     with open(out, "w") as f:
         f.write(text)
-    return out
+    return out, flags
 
 def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
@@ -239,6 +256,7 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=512, trials
     if head.returncode != 0:
         raise SystemExit(f"import failed: {head.stderr.strip()}")
     m = re.match(r"// (\w+): abi=(\w+) returns=(\w+) params=(\d+)", head.stdout)
+    narrow = " narrow=1" in head.stdout.splitlines()[0]
     func, abi, returns, params = m.group(1), m.group(2), m.group(3), int(m.group(4))
     d = workdir or tempfile.mkdtemp(prefix="c_speedup_")
     os.makedirs(d, exist_ok=True)
@@ -264,8 +282,9 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=512, trials
     objs = []
     for src, new in ((original, "ref_fn"), (candidate, "cand_fn")):
         obj = os.path.join(d, new + ".o")
-        src = linkable(src, func, os.path.join(d, new + "_src.c"))
-        r = run(cc + [f"-D{func}={new}", "-c", src, "-o", obj])
+        src, flags = linkable(src, func, os.path.join(d, new + "_src.c"), new,
+                              (abi, returns, params) if narrow else None)
+        r = run(cc + flags + ["-c", src, "-o", obj])
         if r.returncode != 0:
             raise SystemExit(f"gcc failed on {src}: {r.stderr.strip()[:400]}")
         objs.append(obj)

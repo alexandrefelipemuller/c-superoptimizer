@@ -77,7 +77,7 @@ std::string replaceAll(std::string s, const std::string& from, const std::string
 // an original with helpers can be timed against itself in one unit); the
 // timed function becomes `<prefix>fn`.
 std::string prefixFunctions(const std::string& src, const std::string& prefix, const std::string& target) {
-    static const std::regex def("\\b(?:int|void|int32_t|unsigned|uint32_t)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
+    static const std::regex def("\\b(?:int|void|int32_t|unsigned|uint32_t|char|short|uint8_t|int8_t|uint16_t|int16_t)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
     std::string out = src;
     for (auto it = std::sregex_iterator(src.begin(), src.end(), def); it != std::sregex_iterator(); ++it) {
         std::string name = (*it)[1].str();

@@ -18,6 +18,21 @@ namespace algosearch {
 
 namespace {
 
+// A result or parameter narrower than 32 bits (log 197): scripts that call
+// the function from another unit as `int f(int, ...)` need a typed wrapper.
+bool narrowSignature(const CFunctionAbi& abi) {
+    auto narrow = [](const std::string& t) { return t != "int" && t != "unsigned"; };
+    if (abi.returnsValue && narrow(abi.returnType)) return true;
+    for (const auto& t : abi.paramTypes)
+        if (narrow(t)) return true;
+    return false;
+}
+
+}  // namespace
+
+
+namespace {
+
 bool readFile(const std::string& path, std::string& out) {
     std::ifstream in(path);
     if (!in) return false;
@@ -118,7 +133,7 @@ int runCImportTool(int argc, char** argv) {
         std::cout << "// " << imp.abi.name << ": abi=" << kindName(imp.abi.kind)
                   << " returns=" << (imp.abi.returnsValue ? "int" : "void")
                   << " params=" << imp.abi.params.size() << " vars=" << imp.abi.numVars
-                  << " size=" << imp.program->size() << "\n";
+                  << " size=" << imp.program->size() << (narrowSignature(imp.abi) ? " narrow=1" : "") << "\n";
         std::cout << printStmt(*imp.program);
         return 0;
     } catch (const CImportError& e) {
@@ -213,7 +228,7 @@ int runSuperoptTool(int argc, char** argv) {
                   << (r.verified ? "" : " (" + r.verifyReason + ")") << "\n";
         if (cfg.timeTopK > 0) {
             std::cout << "timings " << r.timings << "\ntiming_seconds " << r.timingSeconds << "\nself_control "
-                      << r.selfControl << "\nnoise_threshold " << r.noiseThreshold << "\nemitted_reference "
+                      << r.selfControl << "\nconfirm_self_control " << r.confirmSelfControl << "\nnoise_threshold " << r.noiseThreshold << "\nemitted_reference "
                       << r.emittedReference << "\nmeasured_speedup " << r.measuredSpeedup << "\nequivalence_level " << r.equivalence
                       << "\nexhaustive_rejected " << r.exhaustiveRejected << "\nmodel_best_cost "
                       << r.modelBestCost << "\n";

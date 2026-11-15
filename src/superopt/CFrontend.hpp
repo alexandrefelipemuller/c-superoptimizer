@@ -23,10 +23,12 @@ struct CFunctionAbi {
     Kind kind = Kind::Scalars;
     std::string name;
     bool returnsValue = true;
-    bool returnsUnsigned = false;  // `unsigned` / `uint32_t` result (same bits as the int result)
+    // C spellings of the result and parameter types (`int`, `unsigned`,
+    // `char`, `unsigned short`, ...), for the emitted signature (log 197).
+    std::string returnType = "int";
     // Parameter names in declaration order (Array: {pointer, length}).
     std::vector<std::string> params;
-    std::vector<bool> paramUnsigned;  // per parameter: declared unsigned
+    std::vector<std::string> paramTypes;
     // Mini-C variables the translated program uses, v0 included.
     int numVars = 1;
 };
@@ -43,8 +45,8 @@ struct CImportError : std::runtime_error {
 };
 
 // Translates one function of `source` (the only one, or the one named
-// `funcName`) into Mini-C. Supported subset: `int`/`int32_t` and 32-bit
-// `unsigned`/`uint32_t` scalars and
+// `funcName`) into Mini-C. Supported subset: integer scalars and locals of
+// up to 32 bits (`int`, `unsigned`, `char`, `short`, signed or unsigned) and
 // locals, one array parameter, if/else, while, do-while, for, break,
 // continue, return, assignment and compound assignment, ++/--, the
 // arithmetic, bitwise, comparison, logical (short-circuit preserved) and
