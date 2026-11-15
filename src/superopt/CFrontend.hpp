@@ -44,7 +44,7 @@ struct CImportError : std::runtime_error {
 
 // Translates one function of `source` (the only one, or the one named
 // `funcName`) into Mini-C. Supported subset: `int`/`int32_t` and 32-bit
-// `unsigned`/`uint32_t` (no unsigned `/`, `%`) scalars and
+// `unsigned`/`uint32_t` scalars and
 // locals, one array parameter, if/else, while, do-while, for, break,
 // continue, return, assignment and compound assignment, ++/--, the
 // arithmetic, bitwise, comparison, logical (short-circuit preserved) and

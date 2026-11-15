@@ -81,8 +81,10 @@ Since phase 4a (log 191):
   Mini-C value is the int with the same bits. Ordered comparisons become
   `(a ^ INT_MIN) < (b ^ INT_MIN)`, and an unsigned `>>` becomes a masked
   arithmetic shift. A `u` suffix and hex/octal literals above `INT_MAX` are
-  unsigned, as in C. Unsigned `/` and `%` are still rejected, and so are
-  `unsigned char/short/long` and `L` suffixes. The emitter keeps the
+  unsigned, as in C. Unsigned `/` and `%` (log 196) use signed division only
+  (Hacker's Delight 9-3: shift or mask for powers of two, a compare for
+  divisors >= 2^31, else halve, divide and correct). `unsigned
+  char/short/long` and `L` suffixes are still rejected. The emitter keeps the
   original signature.
 
 Anything else throws `CImportError` with the line; nothing is approximated.

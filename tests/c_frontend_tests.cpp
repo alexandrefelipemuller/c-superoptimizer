@@ -257,13 +257,62 @@ TEST(c_import_unsigned_compares_shifts_literals_and_helpers) {
     bool ok = true;
     runImport(shift, {-1, 32}, ok);
     CHECK(!ok);
-    CHECK(rejects("unsigned f(unsigned x) { return x / 3; }"));  // unsigned division: not yet
-    CHECK(rejects("int f(int x) { unsigned y = x; return y % 3; }"));
     CHECK(rejects("int f(int x) { unsigned char y = x; return y; }"));
     CHECK(rejects("int f(int x) { return (unsigned long)x; }"));
     CHECK(rejects("int f(unsigned *a, int n) { return a[0]; }"));
     CHECK(rejects("int f(int x) { return x + 1UL; }"));
     CHECK(rejects("int f(int x) { return x < 3000000000; }"));  // a long in C
+}
+
+TEST(c_import_unsigned_division_and_remainder_match_native) {
+    using U = unsigned;
+    struct Case {
+        const char* src;
+        std::function<U(U, U)> native;  // nullopt-like: called only when the divisor is nonzero
+        bool divides;                   // the divisor is y (a zero y must fail)
+    };
+    std::vector<Case> cases = {
+        {"unsigned f(unsigned x, unsigned y) { return x / y; }", [](U x, U y) { return x / y; }, true},
+        {"unsigned f(unsigned x, unsigned y) { return x % y; }", [](U x, U y) { return x % y; }, true},
+        {"unsigned f(unsigned x, int y) { return x / 10 + x % 10u * 3; }",
+         [](U x, U) { return x / 10u + x % 10u * 3u; }, false},
+        {"int f(int x, int y) { return x / 7u - x % 7u; }", [](U x, U) { return x / 7u - x % 7u; }, false},
+        {"unsigned f(unsigned x, int y) { return x / 8 + x % 16 + x / 1 + x % 1; }",
+         [](U x, U) { return x / 8u + x % 16u + x + 0u; }, false},
+        {"unsigned f(unsigned x, int y) { return x / 0x80000001u * 5 + x % 0x90000000u; }",
+         [](U x, U) { return x / 0x80000001u * 5u + x % 0x90000000u; }, false},
+        {"unsigned f(unsigned x, unsigned y) { unsigned n = 0; if (y == 0) return 0; while (x) { x /= y; n++; "
+         "if (y < 2) break; } return n; }",
+         [](U x, U y) {
+             U n = 0;
+             if (y == 0) return 0u;
+             while (x) {
+                 x /= y;
+                 n++;
+                 if (y < 2) break;
+             }
+             return n;
+         },
+         false},
+    };
+    std::vector<int> values = scalarValues;
+    for (int v : {3, 10, 16, 255, -3, -10, -7, static_cast<int>(0x80000001u), static_cast<int>(0x90000000u),
+                  static_cast<int>(0xFFFFFFF6u)})
+        values.push_back(v);
+    for (const auto& c : cases) {
+        CImport imp = importCFunction(c.src);
+        for (int x : values)
+            for (int y : values) {
+                bool ok = false;
+                auto r = runImport(imp, {x, y}, ok);
+                if (c.divides && y == 0) {
+                    CHECK(!ok);  // undefined in C: a run-time error
+                    continue;
+                }
+                CHECK(ok);
+                if (ok) CHECK_EQ(r[0], static_cast<int>(c.native(U(x), U(y))));
+            }
+    }
 }
 
 TEST(c_import_inlines_single_return_helpers_once_per_argument) {

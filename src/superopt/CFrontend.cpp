@@ -563,8 +563,66 @@ struct Translator {
         return makeVar(t);
     }
 
+    static ExprPtr unsignedGe(ExprPtr a, ExprPtr b) {
+        return makeBinOp(ExprKind::Ge, flipSign(std::move(a)), flipSign(std::move(b)));
+    }
+
+    // Unsigned `a / b` or `a % b` with signed Mini-C division only (Hacker's
+    // Delight 9-3, log 196). For a below 2^31 and b in 1..2^31-1, signed
+    // division is already right. A divisor of 2^31 or more makes the quotient
+    // a >= b (0 or 1). Otherwise, with a at or above 2^31, q = ((a >>> 1) / b) << 1
+    // is the quotient or one less: one more when a - q*b is still >= b. The
+    // remainder is a - q*b. A zero divisor still fails, as in C.
+    ExprPtr unsignedDivide(bool divide, ExprPtr a, ExprPtr b, std::vector<StmtPtr>& pre) {
+        if (b->kind == ExprKind::IntConst) {
+            uint32_t d = static_cast<uint32_t>(b->intValue);
+            if (d != 0 && (d & (d - 1)) == 0) {  // a power of two
+                if (!divide) return makeBinOp(ExprKind::BitAnd, std::move(a), makeIntConst(static_cast<int>(d - 1)));
+                int n = 0;
+                while ((1u << n) != d) ++n;
+                bool unused = false;
+                return binary(">>", std::move(a), true, makeIntConst(n), false, 0, pre, unused);
+            }
+            if (d == 0) return makeBinOp(divide ? ExprKind::Div : ExprKind::Mod, std::move(a), std::move(b));
+        }
+        ExprPtr x = reusable(std::move(a), pre);
+        ExprPtr y = reusable(std::move(b), pre);
+        int q = newTemp();
+        auto halfQuotient = [&] {
+            // q = ((x >>> 1) / y) << 1; if (x - q*y >= y) q = q + 1;
+            std::vector<StmtPtr> body;
+            ExprPtr half = makeBinOp(ExprKind::BitAnd, makeBinOp(ExprKind::Shr, x->clone(), makeIntConst(1)),
+                                     makeIntConst(INT_MAX));
+            body.push_back(makeAssign(q, makeBinOp(ExprKind::Shl, makeBinOp(ExprKind::Div, std::move(half), y->clone()),
+                                                   makeIntConst(1))));
+            ExprPtr rest = makeBinOp(ExprKind::Sub, x->clone(), makeBinOp(ExprKind::Mul, makeVar(q), y->clone()));
+            std::vector<StmtPtr> bump;
+            bump.push_back(makeAssign(q, makeBinOp(ExprKind::Add, makeVar(q), makeIntConst(1))));
+            body.push_back(makeIf(unsignedGe(std::move(rest), y->clone()), std::move(bump)));
+            return body;
+        };
+        std::vector<StmtPtr> small, large;
+        small.push_back(makeAssign(q, makeBinOp(ExprKind::Div, x->clone(), y->clone())));
+        large = halfQuotient();
+        StmtPtr byDividend = makeIf(makeBinOp(ExprKind::Ge, x->clone(), makeIntConst(0)), std::move(small),
+                                    std::move(large));
+        bool constantDivisor = y->kind == ExprKind::IntConst;
+        if (constantDivisor && y->intValue < 0) {
+            pre.push_back(makeAssign(q, unsignedGe(x->clone(), y->clone())));
+        } else if (constantDivisor) {
+            pre.push_back(std::move(byDividend));
+        } else {
+            std::vector<StmtPtr> huge, rest;
+            huge.push_back(makeAssign(q, unsignedGe(x->clone(), y->clone())));
+            rest.push_back(std::move(byDividend));
+            pre.push_back(makeIf(makeBinOp(ExprKind::Lt, y->clone(), makeIntConst(0)), std::move(huge), std::move(rest)));
+        }
+        if (divide) return makeVar(q);
+        return makeBinOp(ExprKind::Sub, std::move(x), makeBinOp(ExprKind::Mul, makeVar(q), std::move(y)));
+    }
+
     // `a op b` under C's usual arithmetic conversions for int / unsigned.
-    ExprPtr binary(const std::string& op, ExprPtr a, bool ua, ExprPtr b, bool ub, int line,
+    ExprPtr binary(const std::string& op, ExprPtr a, bool ua, ExprPtr b, bool ub, int /*line*/,
                    std::vector<StmtPtr>& pre, bool& isUnsigned) {
         ExprKind k = binaryKinds().at(op);
         bool shift = k == ExprKind::Shl || k == ExprKind::Shr;
@@ -597,7 +655,7 @@ struct Translator {
             }
             case ExprKind::Div:
             case ExprKind::Mod:
-                failAt(line, "unsigned '" + op + "' not supported yet");
+                return unsignedDivide(k == ExprKind::Div, std::move(a), std::move(b), pre);
             default:
                 // + - * << & | ^ == != : the same bits as for int.
                 return makeBinOp(k, std::move(a), std::move(b));

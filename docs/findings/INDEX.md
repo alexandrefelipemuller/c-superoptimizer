@@ -343,3 +343,5 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 194. (results) musl 13 → 32 import; 7/18 gain on random ints, isalpha/iscntrl/setup_salt/zeroinfnan hold on realistic workloads; setl-vs-setbe; setup_salt loop rewrite proved | 11_sections_121-125.md | 2297 |
 | 195. (registered) `superopt --workload FILE`: timing and cost on the user's inputs; character samples, held-out eval workloads | 11_sections_121-125.md | 2318 |
 | 195. (results) WL vs RAND on held-out character inputs: regressions gone (hexval 0.23x, isspace 0.78x), isspace 2.3-2.5x tuned to text; 4 vs 3 gaining samples | 11_sections_121-125.md | 2329 |
+| 196. (registered) Unsigned `/` and `%` via signed division (Hacker's Delight 9-3) | 11_sections_121-125.md | 2345 |
+| 196. (results) Correct (native test, round trip) but opens no new real function: census unchanged (musl 32, Lua 2) | 11_sections_121-125.md | 2357 |
