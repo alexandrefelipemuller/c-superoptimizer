@@ -128,7 +128,7 @@ int runCImportTool(int argc, char** argv) {
 }
 
 int runSuperoptTool(int argc, char** argv) {
-    std::string file, func, outPath;
+    std::string file, func, outPath, workloadPath;
     SuperoptConfig cfg;
     int numVars = -1;
     for (int i = 1; i < argc; ++i) {
@@ -153,6 +153,7 @@ int runSuperoptTool(int argc, char** argv) {
         else if (a == "--algorithmic-moves") cfg.algorithmicMoves = true;
         else if (a == "--no-algorithmic-moves") cfg.algorithmicMoves = false;
         else if (a == "--work-dir") cfg.workDir = next();
+        else if (a == "--workload") workloadPath = next();
         else if (file.empty() && !a.empty() && a[0] != '-') file = a;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
@@ -162,7 +163,7 @@ int runSuperoptTool(int argc, char** argv) {
     }
     if (file.empty()) {
         std::cerr << "usage: algosearch superopt FILE.c [--func NAME] [--seconds 30] [--beam 40] [--mutants 12] "
-                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves]\n";
+                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves] [--workload INPUTS]\n";
         return 1;
     }
     try {
@@ -172,6 +173,30 @@ int runSuperoptTool(int argc, char** argv) {
             return 1;
         }
         CImport imp = importCFunction(source, func);
+        if (!workloadPath.empty()) {
+            // One input per line, as for `c-import --eval`.
+            std::ifstream in(workloadPath);
+            if (!in) {
+                std::cerr << "cannot read " << workloadPath << "\n";
+                return 1;
+            }
+            std::string line;
+            while (std::getline(in, line)) {
+                for (char& c : line)
+                    if (c == ',') c = ' ';
+                std::istringstream ls(line);
+                std::vector<int> input;
+                long long v;
+                while (ls >> v) input.push_back(static_cast<int>(v));
+                bool ok = imp.abi.kind == CFunctionAbi::Kind::Scalars ? input.size() == imp.abi.params.size()
+                                                                       : !input.empty();
+                if (!ok) {
+                    std::cerr << workloadPath << ": an input does not match the signature: " << line << "\n";
+                    return 1;
+                }
+                cfg.userWorkload.push_back(std::move(input));
+            }
+        }
         int vars = numVars > 0 ? numVars : imp.abi.numVars + 2;
         cfg.originalSource = source;
         if (cfg.workDir == SuperoptConfig().workDir) cfg.workDir += "_" + std::to_string(getpid());
@@ -184,7 +209,7 @@ int runSuperoptTool(int argc, char** argv) {
         std::cout << "reference_cost " << r.referenceCost << "\nbest_cost " << r.bestCost << "\nmodel_speedup " << ratio
                   << "\nreference_size " << problem.referenceProgram().size() << "\nbest_size " << r.best->size()
                   << "\nevaluated " << r.evaluated << "\ncorrect " << r.correct << "\ntests " << r.tests
-                  << "\ncounterexamples " << r.counterexamples << "\nverified " << (r.verified ? "yes" : "NO")
+                  << "\ncounterexamples " << r.counterexamples << "\nuser_workload " << r.userWorkload << "\nverified " << (r.verified ? "yes" : "NO")
                   << (r.verified ? "" : " (" + r.verifyReason + ")") << "\n";
         if (cfg.timeTopK > 0) {
             std::cout << "timings " << r.timings << "\ntiming_seconds " << r.timingSeconds << "\nself_control "

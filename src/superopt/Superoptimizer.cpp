@@ -467,9 +467,23 @@ Superoptimizer::Superoptimizer(const ReferenceProblem& problem, SuperoptConfig c
     for (int level : {levels.front(), levels[levels.size() / 2], levels.back()})
         for (auto& inst : problem_.generateAdversarialInstances(level)) tests_.push_back(inst);
 
-    // Workload for the cost: realistic sizes, not the small test levels.
+    // The user's workload: in-domain inputs only, each also a test.
+    for (const auto& in : config_.userWorkload) {
+        auto want = problem_.expected(in);
+        if (!want) continue;
+        userWorkload_.push_back(in);
+        if (userWorkload_.size() <= 64) tests_.push_back({in, *want});
+    }
+    if (!config_.userWorkload.empty() && userWorkload_.empty())
+        throw CImportError("--workload: the reference fails or times out on every input");
+
+    // Workload for the cost: realistic sizes, not the small test levels (or
+    // an even sample of the user's workload).
     Random rng(config_.seed ^ 0x51ed270b27f0a3c5ULL);
-    while (workload_.size() < (scalars ? 64u : 24u)) {
+    size_t costSize = scalars ? 64u : 24u;
+    for (size_t i = 0; !userWorkload_.empty() && i < costSize; ++i)
+        workload_.push_back(userWorkload_[i * userWorkload_.size() / costSize]);
+    while (workload_.size() < costSize) {
         std::vector<int> in;
         if (scalars) {
             in = randomInput(rng, abi, 0);
@@ -521,6 +535,7 @@ SuperoptResult Superoptimizer::run() {
 
     SuperoptResult result;
     result.workload = static_cast<int>(workload_.size());
+    result.userWorkload = static_cast<int>(userWorkload_.size());
     std::vector<size_t> order(tests_.size());
     for (size_t i = 0; i < order.size(); ++i) order[i] = i;
     std::vector<int> out;
@@ -602,7 +617,10 @@ SuperoptResult Superoptimizer::run() {
         std::vector<std::vector<int>> timing;
         Random trng(config_.seed ^ 0x2545f4914f6cdd1dULL);
         bool scalarAbi = abi.kind == CFunctionAbi::Kind::Scalars;
-        for (int tries = 0; timing.size() < static_cast<size_t>(config_.timingInputs) && tries < 20 * config_.timingInputs;
+        for (size_t i = 0; i < userWorkload_.size() && timing.size() < static_cast<size_t>(config_.timingInputs); ++i)
+            timing.push_back(userWorkload_[i]);
+        for (int tries = 0; userWorkload_.empty() && timing.size() < static_cast<size_t>(config_.timingInputs) &&
+                            tries < 20 * config_.timingInputs;
              ++tries) {
             std::vector<int> in;
             if (scalarAbi) {

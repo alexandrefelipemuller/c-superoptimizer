@@ -223,6 +223,18 @@ translation unit, which is how a caller would use it. Even then, a ~1 ns array
 function measured up to 1.5x against itself, so every claim keeps a
 self-control of the same function.
 
+### Workload (log 195)
+
+By default the compiled timing uses 512 random inputs: uniform ints, 30% of
+them small. For a function whose real inputs are narrower, such as characters
+for ctype, give them with `--workload FILE`, one input per line as for
+`c-import --eval`. The in-domain inputs replace the random ones in the timing
+and the model cost, and the first 64 also become tests. Correctness is still
+checked on all inputs. The result is tuned to that workload by design: on
+text, isspace gains 2.3-2.5x with `if (c >= 33) return 0;` first, which
+would cost on whitespace-heavy input. Without a workload, character functions
+picked candidates that regressed on characters, down to 0.23x (hexval).
+
 ### Equivalence levels (log 192)
 
 `superopt` prints `equivalence_level`:
@@ -256,6 +268,7 @@ Inputs the reference fails on are outside the domain everywhere, including
     ./algosearch superopt FILE.c --seconds 60 --out X.c  # phase 3
     scripts/c_speedup.py FILE.c X.c                  # compiled speedup
     scripts/c_speedup.py FILE.c X.c --inline --inputs-file W.txt   # on a given workload
+    ./algosearch superopt FILE.c --time-top 4 --workload W.txt     # search timed on your inputs (log 195)
 
     ./algosearch --problem c:tests/c_samples/array_sum.c --max-n 30 --beam-width 500 \
         --candidates 1500 --max-program-size 150 --seed 2 --c-out found.c

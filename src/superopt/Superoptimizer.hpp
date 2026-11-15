@@ -40,6 +40,11 @@ struct SuperoptConfig {
     // Phase 3c (log 190/190b): algorithmic moves in a quarter of the edits; default
     // since 190b (`--no-algorithmic-moves` restores phase 3b).
     bool algorithmicMoves = true;
+    // Log 195: the user's typical inputs (`--workload FILE`). When given, the
+    // compiled timing and the model cost run on them (the in-domain ones)
+    // instead of random inputs, and they join the tests. Correctness is still
+    // checked on every input (tests, CEGIS, boundaries, exhaustive gate).
+    std::vector<std::vector<int>> userWorkload;
 };
 
 struct SuperoptResult {
@@ -51,6 +56,7 @@ struct SuperoptResult {
     int counterexamples = 0;  // CEGIS: inputs added to the tests
     int tests = 0;
     int workload = 0;
+    int userWorkload = 0;  // in-domain inputs of --workload used (0: random workloads)
     bool verified = false;  // verifyGeneralization on the final best
     std::string verifyReason;
     // (seconds, cost) each time the best improved.
@@ -92,6 +98,7 @@ private:
     SuperoptConfig config_;
     CostModel model_;
     std::vector<Instance> tests_;
+    std::vector<std::vector<int>> userWorkload_;  // config_.userWorkload, in-domain inputs only
     std::vector<long> testLimits_;  // stepBudget per test
     std::vector<std::vector<int>> workload_;
     std::vector<long> workloadLimits_;

@@ -223,6 +223,36 @@ TEST(compiled_exhaustive_check_finds_a_single_wrong_argument) {
     CHECK_EQ(ux.mismatches, 0LL);
 }
 
+TEST(superopt_user_workload_keeps_in_domain_inputs_as_tests) {
+    auto make = [] {
+        return ReferenceProblem(importCFunction("int f(int m, int k) { return 30 + ((0xad5 >> (m - 1)) & 1) + k; }"), 5,
+                                1, 1'000'000);
+    };
+    ReferenceProblem problem = make();
+    SuperoptConfig cfg;
+    cfg.userWorkload = {{3, 0}, {0, 0}, {40, 1}, {12, 7}};  // m = 0 and m = 40 shift out of range
+    Superoptimizer opt(problem, cfg);
+    auto has = [&](std::vector<int> in) {
+        for (const auto& t : opt.tests())
+            if (t.input == in) return true;
+        return false;
+    };
+    CHECK(has({3, 0}));
+    CHECK(has({12, 7}));
+    CHECK(!has({0, 0}));
+    CHECK(!has({40, 1}));
+    SuperoptConfig bad;
+    bad.userWorkload = {{0, 0}};
+    bool threw = false;
+    try {
+        ReferenceProblem p2 = make();
+        Superoptimizer o2(p2, bad);
+    } catch (const CImportError&) {
+        threw = true;
+    }
+    CHECK(threw);
+}
+
 TEST(reference_problem_errors_outside_its_domain_are_not_failures) {
     // musl's days_in_month: the shift is undefined outside m in 1..32.
     ReferenceProblem problem(
