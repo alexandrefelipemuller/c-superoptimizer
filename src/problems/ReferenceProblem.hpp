@@ -46,6 +46,7 @@ public:
     std::vector<Instance> generateAdversarialInstances(int level) const override;
     std::vector<std::vector<int>> exhaustiveInputs(int n) const override;
     bool isSolution(const std::vector<int>& input, const std::vector<int>& output) const override;
+    bool definesAnswer(const std::vector<int>& input) const override { return expected(input).has_value(); }
     double partialScore(const std::vector<int>& input, const std::vector<int>& output) const override;
     int numVars() const override;
     Instance generateBenchmarkInstance(int n, uint64_t seed) const override;

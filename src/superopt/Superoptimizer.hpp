@@ -62,6 +62,11 @@ struct SuperoptResult {
     double emittedReference = 1.0; // the imported reference, emitted, against the original
     double measuredSpeedup = 1.0;  // of `best`, re-measured; 1.0 when best is the reference
     double timingSeconds = 0;
+    // How the returned program's equivalence was established (log 192):
+    // "reference" (nothing changed), "exhaustive" (unary: all 2^32 arguments,
+    // compiled) or "tested" (tests + CEGIS + boundary inputs only).
+    std::string equivalence = "reference";
+    int exhaustiveRejected = 0;  // timed winners refuted by the exhaustive check
     Program modelBest;             // what the model alone would have returned
     long long modelBestCost = 0;
 };

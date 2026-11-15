@@ -31,6 +31,17 @@ public:
     // emitCFunction output, or the original itself for a self-control).
     Timing time(const std::string& candidateSource, int trials = 11) const;
 
+    // Unary scalar functions only (log 192): the candidate against the
+    // original, compiled, on all 2^32 arguments. `complete` is false when it
+    // did not finish within `timeoutSeconds` (nothing proven then).
+    struct Exhaustive {
+        bool complete = false;
+        long long mismatches = 0;
+        int firstBad = 0;
+        std::string error;
+    };
+    Exhaustive exhaustive(const std::string& candidateSource, int timeoutSeconds = 60) const;
+
     int compilations() const { return compilations_; }
 
 private:

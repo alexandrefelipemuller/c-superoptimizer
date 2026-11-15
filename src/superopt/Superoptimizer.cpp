@@ -7,6 +7,7 @@
 #include <memory>
 #include <iostream>
 #include <optional>
+#include <set>
 #include <unordered_set>
 
 #include "core/Random.hpp"
@@ -309,6 +310,105 @@ std::vector<int> randomInput(Random& rng, const CFunctionAbi& abi, int maxLen) {
     return in;
 }
 
+// Constants of the reference, with constant subexpressions folded
+// (`INT_MAX - 1900` is one constant).
+std::optional<long long> foldConst(const Expr& e) {
+    if (e.kind == ExprKind::IntConst) return e.intValue;
+    if (!e.lhs || !e.rhs) return std::nullopt;
+    auto a = foldConst(*e.lhs), b = foldConst(*e.rhs);
+    if (!a || !b) return std::nullopt;
+    auto wrap = [](long long v) { return static_cast<long long>(static_cast<int>(static_cast<uint32_t>(v))); };
+    switch (e.kind) {
+        case ExprKind::Add: return wrap(*a + *b);
+        case ExprKind::Sub: return wrap(*a - *b);
+        case ExprKind::Mul: return wrap(*a * *b);
+        default: return std::nullopt;
+    }
+}
+
+void collectConsts(const Expr* e, std::set<long long>& out) {
+    if (!e) return;
+    if (auto c = foldConst(*e)) {
+        out.insert(*c);
+        return;
+    }
+    collectConsts(e->lhs.get(), out);
+    collectConsts(e->rhs.get(), out);
+}
+
+void collectConsts(const Stmt& s, std::set<long long>& out) {
+    for (const Expr* e : {s.valueExpr.get(), s.indexExpr.get(), s.indexExpr2.get(), s.cond.get()}) collectConsts(e, out);
+    for (const auto& b : s.body) collectConsts(*b, out);
+    for (const auto& b : s.elseBody) collectConsts(*b, out);
+}
+
+// Section 192: inputs at the reference's constants (c - 2 .. c + 2 in each
+// argument) and, for a constant within 4096 of an int limit, the whole tail
+// up to that limit. musl's is_leap guards `y > INT_MAX - 1900`; random and
+// grid inputs never reach that region, and candidates without the guard
+// passed every test.
+std::vector<std::vector<int>> boundaryInputs(const Stmt& reference, const CFunctionAbi& abi) {
+    std::vector<std::vector<int>> res;
+    if (abi.kind != CFunctionAbi::Kind::Scalars) return res;
+    std::set<long long> consts;
+    collectConsts(reference, consts);
+    std::set<long long> values;
+    for (long long c : consts) {
+        for (long long d = -2; d <= 2; ++d) values.insert(c + d);
+        if (INT_MAX - c <= 4096)
+            for (long long v = c; v <= INT_MAX; ++v) values.insert(v);
+        if (c - static_cast<long long>(INT_MIN) <= 4096)
+            for (long long v = INT_MIN; v <= c; ++v) values.insert(v);
+    }
+    size_t arity = abi.params.size();
+    for (long long v : values) {
+        if (v < INT_MIN || v > INT_MAX) continue;
+        for (size_t k = 0; k < arity && res.size() < 50000; ++k)
+            for (int other : {0, 1, -1}) {
+                std::vector<int> in(arity, other);
+                in[k] = static_cast<int>(v);
+                res.push_back(in);
+                if (arity == 1) break;
+            }
+    }
+    return res;
+}
+
+// True when no operation of the program can fail at run time (division by a
+// variable, shift by a variable, array index other than a constant argument
+// slot): then the C function is total and comparing all arguments natively
+// is a proof for a unary function.
+bool cannotFail(const Expr* e, int arity) {
+    if (!e) return true;
+    if (e->kind == ExprKind::Div || e->kind == ExprKind::Mod) {
+        auto d = foldConst(*e->rhs);
+        if (!d || *d == 0 || *d == -1) return false;
+    }
+    if (e->kind == ExprKind::Shl || e->kind == ExprKind::Shr) {
+        auto d = foldConst(*e->rhs);
+        if (!d || *d < 0 || *d > 31) return false;
+    }
+    if (e->kind == ExprKind::ArrayAccess || e->kind == ExprKind::AuxAccess) {
+        auto i = foldConst(*e->lhs);
+        if (e->kind == ExprKind::AuxAccess || !i || *i < 0 || *i >= arity) return false;
+    }
+    return cannotFail(e->lhs.get(), arity) && cannotFail(e->rhs.get(), arity);
+}
+
+bool cannotFail(const Stmt& s, int arity) {
+    if (s.kind == StmtKind::AssignArray) {
+        auto i = s.indexExpr ? foldConst(*s.indexExpr) : std::nullopt;
+        if (!i || *i < 0 || *i >= arity) return false;
+    }
+    for (const Expr* e : {s.valueExpr.get(), s.indexExpr.get(), s.indexExpr2.get(), s.cond.get()})
+        if (!cannotFail(e, arity)) return false;
+    for (const auto& b : s.body)
+        if (!cannotFail(*b, arity)) return false;
+    for (const auto& b : s.elseBody)
+        if (!cannotFail(*b, arity)) return false;
+    return true;
+}
+
 struct Candidate {
     Program program;
     std::string key;
@@ -442,6 +542,7 @@ SuperoptResult Superoptimizer::run() {
         return fails;
     };
 
+    const std::vector<std::vector<int>> boundary = boundaryInputs(problem_.referenceProgram(), abi);
     // CEGIS: an input on which `p` disagrees with the reference, if any.
     auto counterexample = [&](const Stmt& p) -> std::optional<std::vector<int>> {
         auto bad = [&](const std::vector<int>& in) {
@@ -456,6 +557,8 @@ SuperoptResult Superoptimizer::run() {
             for (const auto& in : inputs)
                 if (bad(in)) return in;
         }
+        for (const auto& in : boundary)
+            if (bad(in)) return in;
         Random r(rng.engine()());
         for (int i = 0; i < 2000; ++i) {
             std::vector<int> in = randomInput(r, abi, 40);
@@ -680,6 +783,8 @@ SuperoptResult Superoptimizer::run() {
         result.best = problem_.referenceProgram().clone();
         result.bestCost = result.referenceCost;
         result.measuredSpeedup = 1.0;
+        const bool exhaustiveOk = abi.kind == CFunctionAbi::Kind::Scalars && abi.params.size() == 1 &&
+                                  cannotFail(problem_.referenceProgram(), 1);
         for (size_t k = 0; k < timed.size() && k < 3; ++k) {
             if (timed[k].speedup <= 1.0 + result.noiseThreshold) break;
             auto src = emit(*timed[k].program);
@@ -692,6 +797,19 @@ SuperoptResult Superoptimizer::run() {
             if (r.size() < 3) continue;
             std::sort(r.begin(), r.end());
             if (r[1] > 1.0 + result.noiseThreshold && r[1] > result.measuredSpeedup) {
+                if (exhaustiveOk && src) {
+                    CompiledTimer::Exhaustive x = timer->exhaustive(*src);
+                    if (x.complete && x.mismatches > 0) {
+                        ++result.exhaustiveRejected;
+                        if (config_.verbose)
+                            std::cerr << "exhaustive check refutes a timed winner: " << x.mismatches
+                                      << " mismatches, first at " << x.firstBad << "\n";
+                        continue;
+                    }
+                    result.equivalence = x.complete ? "exhaustive" : "tested";
+                } else {
+                    result.equivalence = "tested";
+                }
                 result.best = timed[k].program->clone();
                 result.bestCost = timed[k].cost;
                 result.measuredSpeedup = r[1];

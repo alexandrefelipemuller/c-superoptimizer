@@ -119,6 +119,11 @@ public:
         return pool[seed % pool.size()];
     }
 
+    // Whether `input` is one the problem defines an answer for. Every problem
+    // defines all of its inputs except ReferenceProblem, where an input the C
+    // reference itself fails on is outside the function's domain.
+    virtual bool definesAnswer(const std::vector<int>& /*input*/) const { return true; }
+
     // Runs `program` against `instance` using `interp`, then classifies the
     // result via isSolution(). Problem-agnostic; implemented once here.
     // `output` is a caller-owned scratch buffer so the hot scoring loop can
@@ -130,6 +135,9 @@ public:
     ExecStatus evaluateInto(const Stmt& program, const Instance& instance, const Interpreter& interp,
                             std::vector<int>& output, long* stepsOut = nullptr) const {
         RunStatus rs = interp.run(program, instance.input, numVars(), output, stepsOut);
+        // An error or timeout on an input outside the problem's domain is not
+        // a failure (only ReferenceProblem has such inputs, log 192).
+        if (rs != RunStatus::COMPLETED && !definesAnswer(instance.input)) return ExecStatus::SUCCESS;
         switch (rs) {
             case RunStatus::TIMEOUT:
                 return ExecStatus::TIMEOUT;

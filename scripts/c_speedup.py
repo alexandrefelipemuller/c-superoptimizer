@@ -216,6 +216,17 @@ def gen_inputs(abi, params, n, rng):
     return lines
 
 
+
+def linkable(src, func, out):
+    """A copy of `src` whose target function is not static, so a harness in
+    another translation unit can call it (real code, log 192: static helpers
+    such as musl's is_leap)."""
+    text = open(src).read()
+    text = re.sub(rf"\bstatic\s+((?:inline\s+)?(?:int|void)\s+{func}\s*\()", r"\1", text)
+    with open(out, "w") as f:
+        f.write(text)
+    return out
+
 def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
@@ -247,6 +258,7 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=512, trials
     objs = []
     for src, new in ((original, "ref_fn"), (candidate, "cand_fn")):
         obj = os.path.join(d, new + ".o")
+        src = linkable(src, func, os.path.join(d, new + "_src.c"))
         r = run(cc + [f"-D{func}={new}", "-c", src, "-o", obj])
         if r.returncode != 0:
             raise SystemExit(f"gcc failed on {src}: {r.stderr.strip()[:400]}")

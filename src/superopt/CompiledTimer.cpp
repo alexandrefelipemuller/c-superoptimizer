@@ -150,4 +150,40 @@ CompiledTimer::Timing CompiledTimer::time(const std::string& candidateSource, in
     return t;
 }
 
+CompiledTimer::Exhaustive CompiledTimer::exhaustive(const std::string& candidateSource, int timeoutSeconds) const {
+    Exhaustive x;
+    if (abi_.kind != CFunctionAbi::Kind::Scalars || abi_.params.size() != 1) {
+        x.error = "exhaustive check needs a unary scalar function";
+        return x;
+    }
+    std::string src = "#include <stdio.h>\n" + prefixFunctions(originalSource_, "ref_", abi_.name) + "\n" +
+                      prefixFunctions(candidateSource, "cand_", abi_.name) +
+                      "\nint main(void) {\n"
+                      "    long long bad = 0; int first = 0;\n"
+                      "    for (long long y = -2147483648LL; y <= 2147483647LL; y++)\n"
+                      "        if (ref_fn((int)y) != cand_fn((int)y)) { if (!bad) first = (int)y; bad++; }\n"
+                      "    printf(\"%lld %d\\n\", bad, first);\n"
+                      "    return 0;\n}\n";
+    std::string base = workDir_ + "/x" + std::to_string(compilations_++);
+    {
+        std::ofstream(base + ".c") << src;
+    }
+    std::string cc = "gcc -O2 -fwrapv -w '" + base + ".c' -o '" + base + "' 2> '" + base + ".err'";
+    if (std::system(cc.c_str()) != 0) {
+        x.error = "gcc failed";
+        return x;
+    }
+    std::string cmd = "timeout " + std::to_string(timeoutSeconds) + " '" + base + "'";
+    FILE* p = popen(cmd.c_str(), "r");
+    if (p) {
+        if (std::fscanf(p, "%lld %d", &x.mismatches, &x.firstBad) == 2) x.complete = true;
+        if (pclose(p) != 0) x.complete = false;
+    }
+    if (!x.complete) x.error = "did not finish in " + std::to_string(timeoutSeconds) + " s";
+    std::remove((base + ".c").c_str());
+    std::remove(base.c_str());
+    std::remove((base + ".err").c_str());
+    return x;
+}
+
 }  // namespace algosearch

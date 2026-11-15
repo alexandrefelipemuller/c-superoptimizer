@@ -6,6 +6,7 @@
 #include "language/Parser.hpp"
 #include "language/PrettyPrinter.hpp"
 #include "problems/ReferenceProblem.hpp"
+#include "search/Benchmark.hpp"
 #include "superopt/CFrontend.hpp"
 #include "superopt/CompiledTimer.hpp"
 #include "superopt/Superoptimizer.hpp"
@@ -200,4 +201,29 @@ TEST(superopt_algorithmic_moves_off_leave_phase_3_edits_unchanged) {
     for (uint64_t seed = 1; seed <= 60; ++seed)
         differs += printStmt(*mutateForSuperopt(*p, 4, 1, seed)) != printStmt(*mutateForSuperopt(*p, 4, 1, seed, true));
     CHECK(differs > 0);
+}
+
+TEST(compiled_exhaustive_check_finds_a_single_wrong_argument) {
+    std::string original = "int f(int x) { return x > 2147483640 ? 1 : 0; }\n";
+    CImport imp = importCFunction(original);
+    CompiledTimer timer(original, imp.abi, {{1}, {2}}, "/tmp/algosearch_exhaustive_test");
+    CompiledTimer::Exhaustive same = timer.exhaustive("int f(int x) { return x >= 2147483641; }\n");
+    CHECK(same.complete);
+    CHECK_EQ(same.mismatches, 0LL);
+    CompiledTimer::Exhaustive off = timer.exhaustive("int f(int x) { return x > 2147483641; }\n");
+    CHECK(off.complete);
+    CHECK_EQ(off.mismatches, 1LL);
+    CHECK_EQ(off.firstBad, 2147483641);
+}
+
+TEST(reference_problem_errors_outside_its_domain_are_not_failures) {
+    // musl's days_in_month: the shift is undefined outside m in 1..32.
+    ReferenceProblem problem(
+        importCFunction("static int days_in_month(int m, int is_leap) { if (m==2) return 28+is_leap;"
+                        " else return 30+((0xad5>>(m-1))&1); }"),
+        5, 1, 1'000'000);
+    CHECK(!problem.definesAnswer({0, 0}));
+    CHECK(problem.definesAnswer({3, 0}));
+    std::string reason;
+    CHECK(verifyGeneralization(problem, problem.referenceProgram(), 1'000'000, reason, false));
 }

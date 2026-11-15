@@ -1,0 +1,6 @@
+/* lua-5.4.6/src/ldebug.c : filterpc (MIT, see LICENSES.md) */
+static int filterpc (int pc, int jmptarget) {
+  if (pc < jmptarget)  /* is code conditional (inside a jump)? */
+    return -1;  /* cannot know who sets that register */
+  else return pc;  /* current position sets that register */
+}

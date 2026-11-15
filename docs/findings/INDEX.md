@@ -332,3 +332,7 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 190b. (results) ON 7 vs OFF 4, no candidate regresses; algorithmic moves become the superopt default | 11_sections_121-125.md | 2195 |
 | 191. (registered) Phase 4a: #define, inlined helpers, continue in any loop; superopt battery on real-style C | 11_sections_121-125.md | 2205 |
 | 191. (results) 1 gain of 6 measurable (sum_abs_diff 1.14x); a slower re-emitted reference was returned (fixed: original text) | 11_sections_121-125.md | 2214 |
+| 192. (registered) Phase 4b: census of musl/Lua functions the front end imports; superopt on them | 11_sections_121-125.md | 2222 |
+| 192. (results) 0.6% musl / 0.1% Lua import; first run returned wrong is_leap code (overflow guard untested); boundary inputs + exhaustive unary check + domain-aware verification | 11_sections_121-125.md | 2231 |
+| 192b. (registered) musl/Lua battery rerun with the fixes | 11_sections_121-125.md | 2242 |
+| 192b. (results) is_leap 2.7-4.0x proved on all 2^32 arguments; 25 earlier unary gains re-proved | 11_sections_121-125.md | 2247 |

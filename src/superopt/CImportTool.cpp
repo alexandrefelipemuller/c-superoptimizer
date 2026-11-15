@@ -189,7 +189,8 @@ int runSuperoptTool(int argc, char** argv) {
         if (cfg.timeTopK > 0) {
             std::cout << "timings " << r.timings << "\ntiming_seconds " << r.timingSeconds << "\nself_control "
                       << r.selfControl << "\nnoise_threshold " << r.noiseThreshold << "\nemitted_reference "
-                      << r.emittedReference << "\nmeasured_speedup " << r.measuredSpeedup << "\nmodel_best_cost "
+                      << r.emittedReference << "\nmeasured_speedup " << r.measuredSpeedup << "\nequivalence_level " << r.equivalence
+                      << "\nexhaustive_rejected " << r.exhaustiveRejected << "\nmodel_best_cost "
                       << r.modelBestCost << "\n";
         }
         std::cout << "trajectory";

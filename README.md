@@ -46,7 +46,7 @@ pointers to the raw data backing each claim.
 
 ```sh
 make            # builds ./algosearch
-make test       # builds and runs ./algosearch_tests (306 unit/integration tests)
+make test       # builds and runs ./algosearch_tests (308 unit/integration tests)
 ```
 
 ## Running a search
@@ -86,6 +86,10 @@ branch-free selects, early exits, strength reduction). On 23 samples it finds
 gains on 7, for example Kernighan's popcount unrolled (1.97x), count of
 trailing zeros (1.29x) and `sign` (1.64x), with no slower result.
 When nothing is measurably faster it returns the original text unchanged.
+On real code (musl and Lua), under 1% of functions fit the subset on their
+own. Among them, musl's `is_leap` becomes 2.7-4.0x faster, checked on all 2^32
+arguments: one-argument functions get that exhaustive check, because tests
+alone once let a wrong overflow-guard rewrite through.
 Semantics, ABI, supported subset, results and the plan are in `docs/superopt.md`.
 
 ## Results

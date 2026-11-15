@@ -205,7 +205,13 @@ std::vector<std::vector<int>> ReferenceProblem::exhaustiveInputs(int n) const {
     if (n != 1) return {};
     size_t k = abi_.params.size();
     int r = k == 1 ? 1024 : k == 2 ? 64 : k == 3 ? 16 : 4;
-    return scalarGrid(-r, r);
+    // Only the reference's domain (log 192: musl's days_in_month shifts by
+    // m - 1, undefined outside m in 1..32; a candidate failing exactly where
+    // the reference fails is not a generalization failure).
+    std::vector<std::vector<int>> grid = scalarGrid(-r, r), in;
+    for (auto& g : grid)
+        if (expected(g)) in.push_back(std::move(g));
+    return in;
 }
 
 bool ReferenceProblem::isSolution(const std::vector<int>& input, const std::vector<int>& output) const {

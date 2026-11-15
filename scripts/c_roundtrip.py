@@ -100,6 +100,17 @@ def harness_source(abi, returns, params):
     return HARNESS % {"protos": protos, "body": body}
 
 
+
+def linkable(src, func, out):
+    """A copy of `src` whose target function is not static, so a harness in
+    another translation unit can call it (real code, log 192: static helpers
+    such as musl's is_leap)."""
+    text = open(src).read()
+    text = re.sub(rf"\bstatic\s+((?:inline\s+)?(?:int|void)\s+{func}\s*\()", r"\1", text)
+    with open(out, "w") as f:
+        f.write(text)
+    return out
+
 def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
@@ -127,6 +138,7 @@ def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout
         f.write(harness_source(abi, returns, params))
     cc = ["gcc", "-O2", "-fwrapv", "-w"]
     for src, obj, new in ((path, "ref.o", "ref_fn"), (os.path.join(d, "emitted.c"), "emit.o", "emit_fn")):
+        src = linkable(src, func, os.path.join(d, new + "_src.c"))
         r = run(cc + [f"-D{func}={new}", "-c", src, "-o", os.path.join(d, obj)])
         if r.returncode != 0:
             return False, f"gcc failed on {src}: {r.stderr.strip()[:400]}"

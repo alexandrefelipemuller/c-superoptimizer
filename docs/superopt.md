@@ -19,7 +19,8 @@ Interface gaps (planned 2026-11-13), and their status:
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
 | 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs |
 | 4 | larger functions and real code, in small steps. 4a: constant `#define`, `INT_MAX`/`INT_MIN`, inlined `return expr;` helpers, `continue` in any loop, target picked automatically | 4a done (log 191): 8 real-style samples import exactly; 1 gain of 6 measurable; no gain returns the original text |
-| 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | |
+| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved |
+| 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | started (log 192): boundary inputs in CEGIS; unary total functions checked on all 2^32 arguments compiled |
 | 6 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
 ## Semantics (phase 0)
@@ -211,6 +212,24 @@ translation unit, which is how a caller would use it. Even then, a ~1 ns array
 function measured up to 1.5x against itself, so every claim keeps a
 self-control of the same function.
 
+### Equivalence levels (log 192)
+
+`superopt` prints `equivalence_level`:
+
+- `reference`: nothing changed; the original text is returned.
+- `exhaustive`: a unary function whose reference cannot fail at run time.
+  The accepted program was compiled and compared with the original on all
+  2^32 arguments (about 5 s). A timed winner that this check refutes is
+  skipped (`exhaustive_rejected`).
+- `tested`: tests, CEGIS and boundary inputs only. Boundary inputs are the
+  reference's constants (constant subexpressions folded) +-2 in each argument,
+  plus the whole tail for a constant within 4096 of an int limit.
+
+Why it matters: on musl's `is_leap`, three test-equivalent candidates dropped
+the `y > INT_MAX - 1900` overflow guard and were wrong on 4 to 29 arguments.
+Inputs the reference fails on are outside the domain everywhere, including
+`verifyGeneralization` (`Problem::definesAnswer`).
+
 ## Tools
 
     ./algosearch c-import FILE.c [--func NAME]      # Mini-C translation
@@ -219,6 +238,7 @@ self-control of the same function.
     ./algosearch c-import FILE.c --program P --emit # C for another Mini-C program under FILE's ABI
     scripts/c_roundtrip.py tests/c_samples/*.c      # interpreter = original C = regenerated C
     scripts/c_roundtrip.py FILE.c --candidate X.c   # a search result against the original
+    scripts/c_census.py --out T.tsv --keep DIR SRC/ # which functions of a code base import on their own
     ./algosearch superopt FILE.c --seconds 60 --out X.c  # phase 3
     scripts/c_speedup.py FILE.c X.c                  # compiled speedup
 
