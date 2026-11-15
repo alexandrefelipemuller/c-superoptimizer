@@ -336,3 +336,5 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 192. (results) 0.6% musl / 0.1% Lua import; first run returned wrong is_leap code (overflow guard untested); boundary inputs + exhaustive unary check + domain-aware verification | 11_sections_121-125.md | 2231 |
 | 192b. (registered) musl/Lua battery rerun with the fixes | 11_sections_121-125.md | 2242 |
 | 192b. (results) is_leap 2.7-4.0x proved on all 2^32 arguments; 25 earlier unary gains re-proved | 11_sections_121-125.md | 2247 |
+| 193. (registered) Character literals in the front end; census rerun and superopt on what opens | 11_sections_121-125.md | 2256 |
+| 193. (results) +1 musl (isblank), +1 Lua (digit); isblank 1.20x proved, from codegen (`||` as `+`) | 11_sections_121-125.md | 2262 |

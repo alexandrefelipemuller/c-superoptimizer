@@ -193,6 +193,23 @@ TEST(c_import_constant_defines_and_limits) {
     }
 }
 
+TEST(c_import_character_literals_are_int_constants) {
+    CImport imp = importCFunction(
+        "int f(int c) { if (c == '\\n') return '\\t' + '\\\\' + '\\'' + '\\0'; "
+        "if (c == '\\x41') return '\\101' - 'A'; return c >= '0' && c <= '9' ? c - '0' : '?'; }");
+    for (int c : std::vector<int>{'\n', 'A', '0', '7', '9', 'a', -1, 200}) {
+        bool ok = false;
+        int r = runImport(imp, {c}, ok)[0];
+        CHECK(ok);
+        int want = c == '\n' ? '\t' + '\\' + '\'' + '\0' : c == 'A' ? 0 : (c >= '0' && c <= '9') ? c - '0' : '?';
+        CHECK_EQ(r, want);
+    }
+    CHECK(rejects("int f(int c) { return c == '\\xff'; }"));  // signedness of char
+    CHECK(rejects("int f(int c) { return c == 'ab'; }"));
+    CHECK(rejects("int f(int c) { return c == ''; }"));
+    CHECK(rejects("int f(int c) { return c == '\\q'; }"));
+}
+
 TEST(c_import_inlines_single_return_helpers_once_per_argument) {
     // pos() reads its argument twice; a[i + 1] is guarded by the && and
     // must not be read at i = n - 1.

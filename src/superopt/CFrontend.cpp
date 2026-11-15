@@ -135,6 +135,45 @@ std::vector<Token> lexWith(const std::string& src, Defines& defines) {
             out.push_back(t);
             continue;
         }
+        if (c == '\'') {
+            // A character literal is an int constant. Only one ASCII character
+            // (or escape): above 127 its value depends on char's signedness.
+            int at = line;
+            size_t s = i++;
+            if (i >= src.size() || src[i] == '\'' || src[i] == '\n') failAt(at, "empty character literal");
+            unsigned long v = 0;
+            if (src[i] != '\\') {
+                v = static_cast<unsigned char>(src[i++]);
+            } else {
+                ++i;
+                char e = i < src.size() ? src[i] : '\n';
+                static const std::string simple = "ntr0abfv\\'\"?";
+                static const unsigned char values[] = {'\n', '\t', '\r', 0, '\a', '\b', '\f', '\v', '\\', '\'', '"', '?'};
+                if (e == 'x') {
+                    size_t h = ++i;
+                    while (i < src.size() && std::isxdigit(static_cast<unsigned char>(src[i]))) ++i;
+                    if (i == h || i - h > 2) failAt(at, "bad \\x escape in character literal");
+                    v = std::stoul(src.substr(h, i - h), nullptr, 16);
+                } else if (e >= '0' && e <= '7') {
+                    size_t o = i;
+                    while (i < src.size() && i - o < 3 && src[i] >= '0' && src[i] <= '7') ++i;
+                    v = std::stoul(src.substr(o, i - o), nullptr, 8);
+                } else if (simple.find(e) != std::string::npos) {
+                    v = values[simple.find(e)];
+                    ++i;
+                } else {
+                    failAt(at, std::string("unknown escape in character literal: \\") + e);
+                }
+            }
+            if (i >= src.size() || src[i] != '\'')
+                failAt(at, "multi-character or unterminated character literal not supported");
+            ++i;
+            if (v > 127) failAt(at, "character literal above 127 not supported (depends on char signedness)");
+            Token t{Tok::Number, src.substr(s, i - s), at};
+            t.value = static_cast<long long>(v);
+            out.push_back(t);
+            continue;
+        }
         bool matched = false;
         for (const char* p : puncts) {
             size_t n = std::char_traits<char>::length(p);
