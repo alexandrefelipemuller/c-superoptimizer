@@ -230,7 +230,7 @@ int runSuperoptTool(int argc, char** argv) {
             std::cout << "timings " << r.timings << "\ntiming_seconds " << r.timingSeconds << "\nself_control "
                       << r.selfControl << "\nconfirm_self_control " << r.confirmSelfControl << "\nnoise_threshold " << r.noiseThreshold << "\nemitted_reference "
                       << r.emittedReference << "\nmeasured_speedup " << r.measuredSpeedup << "\nequivalence_level " << r.equivalence
-                      << "\nexhaustive_rejected " << r.exhaustiveRejected << "\nmodel_best_cost "
+                      << "\nexhaustive_rejected " << r.exhaustiveRejected << "\nfuzz_rejected " << r.fuzzRejected << "\nmodel_best_cost "
                       << r.modelBestCost << "\n";
         }
         std::cout << "trajectory";

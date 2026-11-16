@@ -374,6 +374,38 @@ std::vector<std::vector<int>> boundaryInputs(const Stmt& reference, const CFunct
     return res;
 }
 
+// One in-domain-looking neighbour of a workload input (log 199c): the
+// workload covers a thin slice of the domain (text) and random arrays miss it
+// (no NUL), so CEGIS and the final check mutate workload inputs. 1-3 edits:
+// a random value in the workload's range, one bit flipped, an element set to
+// another one with one bit flipped or +-1 (near-equal aligned pairs, e.g.
+// "[" vs "{"), a copy, a zero (a shorter string) or a program constant +-2.
+// Inputs the reference rejects are dropped by the caller.
+std::vector<int> mutateInput(const std::vector<int>& seed, Random& r, int lo, int hi,
+                             const std::vector<int>& consts) {
+    std::vector<int> in = seed;
+    if (in.empty()) return in;
+    int last = static_cast<int>(in.size()) - 1;
+    int bits = 1;
+    while (bits < 31 && (1LL << bits) <= std::max(std::abs(static_cast<long long>(lo)), static_cast<long long>(hi))) ++bits;
+    int edits = r.uniformInt(1, 3);
+    for (int e = 0; e < edits; ++e) {
+        size_t i = static_cast<size_t>(r.uniformInt(0, last));
+        size_t j = static_cast<size_t>(r.uniformInt(0, last));
+        switch (r.uniformInt(0, 5)) {
+        case 0: in[i] = r.uniformInt(lo, hi); break;
+        case 1: in[i] ^= 1 << r.uniformInt(0, bits - 1); break;
+        case 2: in[j] = r.uniformInt(0, 1) ? in[i] ^ (1 << r.uniformInt(0, bits - 1)) : in[i] + (r.uniformInt(0, 1) ? 1 : -1); break;
+        case 3: in[i] = in[j]; break;
+        case 4: in[i] = 0; break;
+        default:
+            if (!consts.empty()) in[i] = consts[static_cast<size_t>(r.uniformInt(0, static_cast<int>(consts.size()) - 1))];
+            break;
+        }
+    }
+    return in;
+}
+
 // True when no operation of the program can fail at run time (division by a
 // variable, shift by a variable, array index other than a constant argument
 // slot): then the C function is total and comparing all arguments natively
@@ -558,6 +590,32 @@ SuperoptResult Superoptimizer::run() {
     };
 
     const std::vector<std::vector<int>> boundary = boundaryInputs(problem_.referenceProgram(), abi);
+    // Mutation fuzz (log 199c): the workload's value range, and the constants
+    // (+-2) of the reference and the candidate.
+    int wlLo = 0, wlHi = 0;
+    for (const auto& in : userWorkload_)
+        for (int v : in) { wlLo = std::min(wlLo, v); wlHi = std::max(wlHi, v); }
+    auto mutationConsts = [&](const Stmt& p) {
+        std::set<long long> cs, vs;
+        collectConsts(problem_.referenceProgram(), cs);
+        collectConsts(p, cs);
+        for (long long c : cs)
+            for (long long d = -2; d <= 2; ++d)
+                if (c + d >= INT_MIN && c + d <= INT_MAX) vs.insert(c + d);
+        return std::vector<int>(vs.begin(), vs.end());
+    };
+    // The final check of an array winner: 200,000 mutations, fixed seed.
+    auto fuzzRefutes = [&](const Stmt& p) {
+        Random r(config_.seed ^ 0x6a09e667f3bcc909ULL);
+        std::vector<int> pc = mutationConsts(p), o;
+        for (int i = 0; i < 200000; ++i) {
+            const auto& seed = userWorkload_[static_cast<size_t>(r.uniformInt(0, static_cast<int>(userWorkload_.size()) - 1))];
+            std::vector<int> in = mutateInput(seed, r, wlLo, wlHi, pc);
+            long steps = problem_.referenceSteps(in);
+            if (steps >= 0 && !agrees(p, in, stepBudget(steps), o)) return true;
+        }
+        return false;
+    };
     // CEGIS: an input on which `p` disagrees with the reference, if any.
     auto counterexample = [&](const Stmt& p) -> std::optional<std::vector<int>> {
         auto bad = [&](const std::vector<int>& in) {
@@ -580,6 +638,14 @@ SuperoptResult Superoptimizer::run() {
         for (const auto& in : userWorkload_)
             if (bad(in)) return in;
         Random r(rng.engine()());
+        if (abi.kind == CFunctionAbi::Kind::Array && !userWorkload_.empty()) {
+            std::vector<int> pc = mutationConsts(p);
+            for (int i = 0; i < 3000; ++i) {
+                const auto& seed = userWorkload_[static_cast<size_t>(r.uniformInt(0, static_cast<int>(userWorkload_.size()) - 1))];
+                std::vector<int> in = mutateInput(seed, r, wlLo, wlHi, pc);
+                if (bad(in)) return in;
+            }
+        }
         for (int i = 0; i < 2000; ++i) {
             std::vector<int> in = randomInput(r, abi, 40);
             if (bad(in)) return in;
@@ -884,6 +950,13 @@ SuperoptResult Superoptimizer::run() {
                         continue;
                     }
                     result.equivalence = x.complete ? "exhaustive" : "tested";
+                } else if (abi.kind == CFunctionAbi::Kind::Array && !userWorkload_.empty()) {
+                    if (fuzzRefutes(*timed[k].program)) {
+                        ++result.fuzzRejected;
+                        if (config_.verbose) std::cerr << "mutation fuzz refutes a timed winner\n";
+                        continue;
+                    }
+                    result.equivalence = "fuzzed";
                 } else {
                     result.equivalence = "tested";
                 }

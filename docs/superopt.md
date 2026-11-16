@@ -251,8 +251,12 @@ checked on all inputs, and the counterexample search scans the whole workload
 (log 199). For string code (int arrays holding NUL-terminated text) that is not
 enough: random arrays rarely hold a NUL, so almost nothing outside the workload
 is checked, and all three strcasecmp winners of log 199 were wrong on other
-bytes (`(a | 32) == (b | 32)` treats `[` and `{` as equal). Treat an array
-winner at `equivalence_level tested` as unverified. The result is tuned to that workload by design: on
+bytes (`(a | 32) == (b | 32)` treats `[` and `{` as equal). Since log 199c
+an array function with a workload also gets mutations of workload inputs
+(bit flips, near-equal aligned elements, zeros, program constants) in CEGIS,
+and a timed winner must pass 200,000 of them (`equivalence_level fuzzed`,
+`fuzz_rejected` counts the refuted ones). `tested` still means unverified
+beyond the tests. The result is tuned to that workload by design: on
 text, isspace gains 2.3-2.5x with `if (c >= 33) return 0;` first, which
 would cost on whitespace-heavy input. Without a workload, character functions
 picked candidates that regressed on characters, down to 0.23x (hexval).

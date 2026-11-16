@@ -74,9 +74,12 @@ struct SuperoptResult {
     double timingSeconds = 0;
     // How the returned program's equivalence was established (log 192):
     // "reference" (nothing changed), "exhaustive" (unary: all 2^32 arguments,
-    // compiled) or "tested" (tests + CEGIS + boundary inputs only).
+    // compiled), "fuzzed" (arrays with a user workload: also 200,000
+    // mutations of workload inputs, log 199c) or "tested" (tests + CEGIS +
+    // boundary inputs only).
     std::string equivalence = "reference";
     int exhaustiveRejected = 0;  // timed winners refuted by the exhaustive check
+    int fuzzRejected = 0;        // timed array winners refuted by the mutation fuzz (log 199c)
     Program modelBest;             // what the model alone would have returned
     long long modelBestCost = 0;
 };

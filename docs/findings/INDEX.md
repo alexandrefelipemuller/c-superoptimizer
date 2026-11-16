@@ -358,3 +358,5 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 199. (registered) String pilot: strlen, atoi, strcmp, strcasecmp, memcmp, keyhash, sysv_hash, gnu_hash on int arrays | 11_sections_121-125.md | 2603 |
 | 199. (deviation) Wrong strcasecmp code passed: CEGIS random arrays almost never in the string domain; counterexample search now scans the whole workload | 11_sections_121-125.md | 2627 |
 | 199. (results) No valid gain on 8; all 3 strcasecmp winners wrong off the workload ((a\|32)==(b\|32), "[" vs "{"); string code needs in-domain off-workload counterexamples | 11_sections_121-125.md | 2639 |
+| 199c. (registered) Array counterexamples off the workload: mutations in CEGIS + 200,000-mutation final check (`fuzzed`) | 11_sections_121-125.md | 2684 |
+| 199c. (results) No wrong winner (6/6 pass byte fuzz); strcasecmp's 3 timed winners rejected in every run; strlen 1.10 (unroll) at the threshold; byte loops give ~1.1x at most | 11_sections_121-125.md | 2714 |

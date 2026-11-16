@@ -30,7 +30,7 @@ one() {
 export -f one
 for f in $SAMPLES; do for seed in $SEEDS; do echo "$f $seed"; done; done |
     xargs -P "$JOBS" -n 2 bash -c 'one "$0" "$1" "'"$OUT"'" "'"$SECS"'" "'"$TIME_TOP"'" "'"$EXTRA"'"'
-printf 'sample\tseed\tverified\tref_cost\tbest_cost\tmodel_speedup\tref_size\tbest_size\tcounterexamples\tequivalence\tspeedup\tby_order\tref_ns\tcand_ns\tinline_speedup\tinline_ref_ns\tloop_measured\tloop_self\tloop_noise\tmodel_best_cost\tequivalence_level\texhaustive_rejected\tuser_workload\n' > "$OUT/summary.tsv"
+printf 'sample\tseed\tverified\tref_cost\tbest_cost\tmodel_speedup\tref_size\tbest_size\tcounterexamples\tequivalence\tspeedup\tby_order\tref_ns\tcand_ns\tinline_speedup\tinline_ref_ns\tloop_measured\tloop_self\tloop_noise\tmodel_best_cost\tequivalence_level\texhaustive_rejected\tuser_workload\tfuzz_rejected\n' > "$OUT/summary.tsv"
 for f in $SAMPLES; do for seed in $SEEDS; do
     s=$(basename "$f" .c); tag="$s.seed$seed"; log="$OUT/$tag.log"
     get() { grep -m1 "^$1 " "$log" | cut -d' ' -f2; }
@@ -47,10 +47,10 @@ for f in $SAMPLES; do for seed in $SEEDS; do
         isp=$(echo "$mi" | grep -oE 'speedup [0-9.]+' | cut -d' ' -f2)
         irn=$(echo "$mi" | grep -oE 'ref_ns [0-9.]+' | cut -d' ' -f2)
     fi
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$s" "$seed" "$(get verified)" "$(get reference_cost)" \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$s" "$seed" "$(get verified)" "$(get reference_cost)" \
         "$(get best_cost)" "$(get model_speedup)" "$(get reference_size)" "$(get best_size)" "$(get counterexamples)" \
         "$eq" "$sp" "$bo" "$rn" "$cn" "$isp" "$irn" "$(get measured_speedup)" "$(get self_control)" \
-        "$(get noise_threshold)" "$(get model_best_cost)" "$(get equivalence_level)" "$(get exhaustive_rejected)" "$(get user_workload)" >> "$OUT/summary.tsv"
+        "$(get noise_threshold)" "$(get model_best_cost)" "$(get equivalence_level)" "$(get exhaustive_rejected)" "$(get user_workload)" "$(get fuzz_rejected)" >> "$OUT/summary.tsv"
 done; done
 # External self-control per sample (the original against itself), both modes.
 printf 'sample\tself_call\tself_inline\n' > "$OUT/self_control.tsv"
