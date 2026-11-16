@@ -22,6 +22,8 @@ const char* harnessTemplate = R"(#include <stdio.h>
 %CAND%
 static volatile long long h_sink;
 static int h_nin, h_len[65536], h_off[65536], h_data[4000000], h_buf[4096];
+static unsigned char h_u8[65536];
+static signed char h_s8[65536];
 static double h_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e9 + t.tv_nsec; }
 __attribute__((noinline, aligned(64))) static long long run_ref(int reps) {
     long long acc = 0;
@@ -45,6 +47,7 @@ int main(int argc, char **argv) {
         char *p = line, *end;
         h_off[h_nin] = pos; h_len[h_nin] = 0;
         for (;;) { long x = strtol(p, &end, 10); if (end == p) break; h_data[pos++] = (int)x; h_len[h_nin]++; p = end; }
+        h_u8[h_nin] = (unsigned char)h_data[h_off[h_nin]]; h_s8[h_nin] = (signed char)h_data[h_off[h_nin]];
         h_nin++;
     }
     fclose(f);
@@ -86,7 +89,9 @@ std::string prefixFunctions(const std::string& src, const std::string& prefix, c
     return out;
 }
 
-std::string callFor(const CFunctionAbi& abi, const std::string& fn) {
+std::string callFor(const CFunctionAbi& abi, const std::string& fn, const std::string& byteType) {
+    if (byteType == "unsigned char") return "acc += " + fn + "(h_u8[i]);";
+    if (byteType == "signed char") return "acc += " + fn + "(h_s8[i]);";
     if (abi.kind == CFunctionAbi::Kind::Scalars) {
         std::string args;
         for (size_t k = 0; k < abi.params.size(); ++k)
@@ -101,8 +106,11 @@ std::string callFor(const CFunctionAbi& abi, const std::string& fn) {
 }  // namespace
 
 CompiledTimer::CompiledTimer(std::string originalSource, CFunctionAbi abi, std::vector<std::vector<int>> workload,
-                             std::string workDir)
-    : originalSource_(std::move(originalSource)), abi_(std::move(abi)), workDir_(std::move(workDir)) {
+                             std::string workDir, std::string byteType)
+    : originalSource_(std::move(originalSource)), abi_(std::move(abi)), workDir_(std::move(workDir)),
+      byteType_(std::move(byteType)) {
+    if (!byteType_.empty() && (abi_.kind != CFunctionAbi::Kind::Scalars || abi_.params.size() != 1))
+        throw CImportError("byte timing context needs a unary scalar function");
     if (std::system(("mkdir -p '" + workDir_ + "'").c_str()) != 0)
         throw CImportError("cannot create the timing directory " + workDir_);
     inputsPath_ = workDir_ + "/inputs.txt";
@@ -118,8 +126,8 @@ CompiledTimer::Timing CompiledTimer::time(const std::string& candidateSource, in
     std::string src = harnessTemplate;
     src = replaceAll(src, "%REF%", prefixFunctions(originalSource_, "ref_", abi_.name));
     src = replaceAll(src, "%CAND%", prefixFunctions(candidateSource, "cand_", abi_.name));
-    src = replaceAll(src, "%CALL_REF%", callFor(abi_, "ref_fn"));
-    src = replaceAll(src, "%CALL_CAND%", callFor(abi_, "cand_fn"));
+    src = replaceAll(src, "%CALL_REF%", callFor(abi_, "ref_fn", byteType_));
+    src = replaceAll(src, "%CALL_CAND%", callFor(abi_, "cand_fn", byteType_));
     std::string base = workDir_ + "/t" + std::to_string(compilations_++);
     {
         std::ofstream(base + ".c") << src;

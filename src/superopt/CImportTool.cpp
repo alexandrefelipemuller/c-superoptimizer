@@ -169,6 +169,13 @@ int runSuperoptTool(int argc, char** argv) {
         else if (a == "--no-algorithmic-moves") cfg.algorithmicMoves = false;
         else if (a == "--work-dir") cfg.workDir = next();
         else if (a == "--workload") workloadPath = next();
+        else if (a == "--timing-context") {
+            cfg.timingContext = next();
+            if (cfg.timingContext != "int" && cfg.timingContext != "byte") {
+                std::cerr << "--timing-context takes int or byte\n";
+                return 1;
+            }
+        }
         else if (file.empty() && !a.empty() && a[0] != '-') file = a;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
@@ -178,7 +185,7 @@ int runSuperoptTool(int argc, char** argv) {
     }
     if (file.empty()) {
         std::cerr << "usage: algosearch superopt FILE.c [--func NAME] [--seconds 30] [--beam 40] [--mutants 12] "
-                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves] [--workload INPUTS]\n";
+                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves] [--workload INPUTS] [--timing-context int|byte]\n";
         return 1;
     }
     try {
@@ -227,7 +234,7 @@ int runSuperoptTool(int argc, char** argv) {
                   << "\ncounterexamples " << r.counterexamples << "\nuser_workload " << r.userWorkload << "\nverified " << (r.verified ? "yes" : "NO")
                   << (r.verified ? "" : " (" + r.verifyReason + ")") << "\n";
         if (cfg.timeTopK > 0) {
-            std::cout << "timings " << r.timings << "\ntiming_seconds " << r.timingSeconds << "\nself_control "
+            std::cout << "timings " << r.timings << "\ntiming_seconds " << r.timingSeconds << "\ntiming_context " << r.timingContext << "\nself_control "
                       << r.selfControl << "\nconfirm_self_control " << r.confirmSelfControl << "\nnoise_threshold " << r.noiseThreshold << "\nemitted_reference "
                       << r.emittedReference << "\nmeasured_speedup " << r.measuredSpeedup << "\nequivalence_level " << r.equivalence
                       << "\nexhaustive_rejected " << r.exhaustiveRejected << "\nfuzz_rejected " << r.fuzzRejected << "\nmodel_best_cost "

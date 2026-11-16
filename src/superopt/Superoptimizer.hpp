@@ -48,6 +48,10 @@ struct SuperoptConfig {
     // instead of random inputs, and they join the tests. Correctness is still
     // checked on every input (tests, CEGIS, boundaries, exhaustive gate).
     std::vector<std::vector<int>> userWorkload;
+    // Log 201: "byte" times a unary function whose timing inputs are all bytes
+    // (0..255, or -128..127) in a loop over a byte buffer, the context of a
+    // caller scanning text; "int" passes every argument from an int array.
+    std::string timingContext = "int";
 };
 
 struct SuperoptResult {
@@ -72,6 +76,7 @@ struct SuperoptResult {
     double emittedReference = 1.0; // the imported reference, emitted, against the original
     double measuredSpeedup = 1.0;  // of `best`, re-measured; 1.0 when best is the reference
     double timingSeconds = 0;
+    std::string timingContext = "int";  // "int", or the byte buffer's type (log 201)
     // How the returned program's equivalence was established (log 192):
     // "reference" (nothing changed), "exhaustive" (unary: all 2^32 arguments,
     // compiled), "fuzzed" (arrays with a user workload: also 200,000

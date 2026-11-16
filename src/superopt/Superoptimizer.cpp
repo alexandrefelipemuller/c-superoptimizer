@@ -734,8 +734,22 @@ SuperoptResult Superoptimizer::run() {
             randomSet(0x2545f4914f6cdd1dULL, timing);
             randomSet(0x9e3779b97f4a7c15ULL, confirm);
         }
-        timer = std::make_unique<CompiledTimer>(config_.originalSource, abi, timing, config_.workDir);
-        confirmTimer = std::make_unique<CompiledTimer>(config_.originalSource, abi, confirm, config_.workDir + "/confirm");
+        // Log 201: a unary function whose timing inputs are all bytes is timed in
+        // a loop over a byte buffer (unsigned when they fit 0..255).
+        std::string byteType;
+        if (config_.timingContext == "byte" && scalarAbi && abi.params.size() == 1) {
+            bool u8 = true, s8 = true;
+            for (const auto* set : {&timing, &confirm})
+                for (const auto& in : *set) {
+                    u8 = u8 && in[0] >= 0 && in[0] <= 255;
+                    s8 = s8 && in[0] >= -128 && in[0] <= 127;
+                }
+            byteType = u8 ? "unsigned char" : s8 ? "signed char" : "";
+        }
+        result.timingContext = byteType.empty() ? "int" : byteType == "unsigned char" ? "uchar" : "schar";
+        timer = std::make_unique<CompiledTimer>(config_.originalSource, abi, timing, config_.workDir, byteType);
+        confirmTimer = std::make_unique<CompiledTimer>(config_.originalSource, abi, confirm, config_.workDir + "/confirm",
+                                                       byteType);
         // Noise: the original against itself, on both input sets.
         double spread = 0;
         auto selfControl = [&](CompiledTimer& tm) {

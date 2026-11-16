@@ -16,8 +16,13 @@ class CompiledTimer {
 public:
     // `originalSource`: the user's C file; `workload`: the inputs (scalar
     // arguments, or one array per input) every call is timed on.
+    // `byteType` (log 201): "" times each call on an argument read from an int
+    // array; "unsigned char" / "signed char" (unary functions whose inputs are
+    // all bytes) read it from a byte buffer instead, as a caller scanning a
+    // `char *` does. gcc can compile the same function differently in the two
+    // contexts (log 200: 1.41x against 1.00x).
     CompiledTimer(std::string originalSource, CFunctionAbi abi, std::vector<std::vector<int>> workload,
-                  std::string workDir);
+                  std::string workDir, std::string byteType = "");
 
     struct Timing {
         bool ok = false;           // compiled and ran
@@ -51,6 +56,7 @@ private:
     CFunctionAbi abi_;
     std::string workDir_;
     std::string inputsPath_;
+    std::string byteType_;
     mutable int compilations_ = 0;
 };
 
