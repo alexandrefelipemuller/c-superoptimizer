@@ -19,7 +19,7 @@ Interface gaps (planned 2026-11-13), and their status:
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
 | 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs |
 | 4 | larger functions and real code, in small steps. 4a: constant `#define`, `INT_MAX`/`INT_MIN`, inlined `return expr;` helpers, `continue` in any loop, target picked automatically | 4a done (log 191): 8 real-style samples import exactly; 1 gain of 6 measurable; no gain returns the original text |
-| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200) |
+| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200); in-loop byte context, opt-in (201) |
 | 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | started (log 192): boundary inputs in CEGIS; unary total functions checked on all 2^32 arguments compiled; array functions: whole workload + workload mutations in CEGIS, 200,000-mutation final check, level `fuzzed` (199/199c) |
 | 6 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -232,9 +232,14 @@ The calling context matters too (log 200). The timer passes each argument
 from an int array; for a `char` parameter gcc then inlines different code for
 versions that compile to the same function (is_cr_or_lf: identical assembly,
 1.41x vs 1.00x). `scripts/c_byte_caller.py` times character functions in a
-loop over a `const char *` buffer, as real callers do: isalpha's 1.8x there
-is 1.1x, ascii_is_unsafe's 3.6x is 2.15x, and ascii_to_bin gains (1.26-1.29x)
-only there. The search itself still times in the int-array context.
+loop over a `const char *` buffer, as real callers do (aligned since log 201:
+unaligned, identical copies measured up to 1.27x apart): isalpha's 1.8x there
+is 1.36x, ascii_is_unsafe's 3.6x is 2.3x. `--timing-context byte` (log 201,
+opt-in) makes the in-loop timer read a byte-input unary function's argument
+from a byte buffer. It found the same gains as the int context and accepted
+one regression (hex_to_int 1.15x in the loop, 0.88x in c_byte_caller): two
+byte-buffer callers differ by up to 30% on branchy code, so a gain under about
+1.2x on a byte function depends on the caller. The default stays `int`.
 
 `scripts/c_speedup.py ORIGINAL.c FOUND.c` measures what counts: both compiled
 with gcc -O2 -fwrapv in separate translation units, called through a volatile
@@ -313,7 +318,7 @@ Inputs the reference fails on are outside the domain everywhere, including
     scripts/c_speedup.py FILE.c X.c --inline --inputs-file W.txt   # on a given workload
     ./algosearch superopt FILE.c --time-top 4 --workload W.txt     # search timed on your inputs (log 195)
     scripts/run_ceiling_battery.sh OUT TAG          # hand versions vs search winners (log 198; RUNS=DIR for other winners, 198b; DIR=, LIST= for another sample set, 200)
-    scripts/c_byte_caller.py W.txt ORIG.c X.c ...    # char functions timed in a loop over a byte buffer (log 200)
+    scripts/c_byte_caller.py W.txt ORIG.c X.c ...    # char functions timed in a loop over a byte buffer (log 200; aligned, 201)
     scripts/make_int_workloads.py OUTDIR [--large N] # nibble / allocation-size workloads (log 200)
     # a speedup ratio is comparable only within one session (198b): re-measure the baseline arm alongside
 

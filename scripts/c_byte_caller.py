@@ -11,6 +11,8 @@ function (log 200: is_cr_or_lf measured 1.41x there and 1.00x here).
 INPUTS.txt: one byte value per line (a *_eval_large.txt). The buffer is
 `unsigned char` unless --signed. Prints ns per byte (best of 15 x 200
 passes) and the speedup over ORIGINAL; the sums of the results must agree.
+Compiled with 64-byte function and loop alignment (log 201: without it,
+identical copies of one function measured up to 1.27x apart).
 """
 import argparse
 import os
@@ -69,7 +71,7 @@ int main(int argc, char **argv) {{
     d = tempfile.mkdtemp(prefix="c_byte_caller_")
     with open(os.path.join(d, "b.c"), "w") as g:
         g.write(src)
-    r = subprocess.run(["gcc", "-O2", "-fwrapv", "-w", os.path.join(d, "b.c"), "-o", os.path.join(d, "b")],
+    r = subprocess.run(["gcc", "-O2", "-fwrapv", "-w", "-falign-functions=64", "-falign-loops=64", os.path.join(d, "b.c"), "-o", os.path.join(d, "b")],
                        capture_output=True, text=True)
     if r.returncode:
         raise SystemExit(r.stderr[:2000])
