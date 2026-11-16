@@ -8,19 +8,12 @@
 #     ONLY=REGEX scripts/run_ceiling_battery.sh OUT TAG   # only the matching samples
 #     RUNS=DIR scripts/run_ceiling_battery.sh OUT TAG     # winners from DIR/{text,b64,hex,random}/ (log 198b)
 set -u
-OUT=$1; TAG=$2; H=tests/c_samples_musl_lua/hand
+#     DIR=tests/c_samples_real2 LIST=FILE RUNS=... scripts/run_ceiling_battery.sh OUT TAG
+#         another sample directory (hand versions in DIR/hand/) and its list,
+#         lines "sample run_dir workload" as below (log 200)
+OUT=$1; TAG=$2; DIR=${DIR:-tests/c_samples_musl_lua}; H=$DIR/hand
 printf 'sample\tworkload\tvariant\tinline_speedup\tline\n' > "$OUT/ceiling_$TAG.tsv"
-while read s src ev; do
-  [[ $s =~ ${ONLY:-.} ]] || continue
-  f=tests/c_samples_musl_lua/$s.c
-  EV="--inputs 65536"; [ "$ev" != random ] && EV="$EV --inputs-file $OUT/${ev}_eval_large.txt"
-  for v in self hand 10 11 12; do
-    case $v in self) c=$f;; hand) c=$H/$s.c;; *) c=data/$src/$s.seed$v.found.c; [ -n "${RUNS:-}" ] && c=$RUNS/$ev/$s.seed$v.found.c;; esac
-    line=$(python3 scripts/c_speedup.py "$f" "$c" --inline $EV --workdir "$OUT/w_${s}_$v" 2>&1 | tail -1)
-    sp=$(echo "$line" | grep -oE 'speedup [0-9.]+' | cut -d' ' -f2)
-    printf '%s\t%s\t%s\t%s\t%s\n' "$s" "$ev" "$v" "$sp" "$line" >> "$OUT/ceiling_$TAG.tsv"
-  done
-done <<'L'
+DEFAULT_LIST=$(cat <<'L'
 musl_isalpha superopt_confirm_text_20261115 text
 musl_iscntrl superopt_confirm_text_20261115 text
 musl_isspace superopt_confirm_text_20261115 text
@@ -49,4 +42,16 @@ musl_isascii superopt_musl_lua2_20261115 random
 musl_toascii superopt_musl_lua2_20261115 random
 lua_filterpc superopt_musl_lua2_20261115 random
 L
+)
+while read s src ev; do
+  [[ $s =~ ${ONLY:-.} ]] || continue
+  f=$DIR/$s.c
+  EV="--inputs 65536"; [ "$ev" != random ] && EV="$EV --inputs-file $OUT/${ev}_eval_large.txt"
+  for v in self hand 10 11 12; do
+    case $v in self) c=$f;; hand) c=$H/$s.c;; *) c=data/$src/$s.seed$v.found.c; [ -n "${RUNS:-}" ] && c=$RUNS/$ev/$s.seed$v.found.c;; esac
+    line=$(python3 scripts/c_speedup.py "$f" "$c" --inline $EV --workdir "$OUT/w_${s}_$v" 2>&1 | tail -1)
+    sp=$(echo "$line" | grep -oE 'speedup [0-9.]+' | cut -d' ' -f2)
+    printf '%s\t%s\t%s\t%s\t%s\n' "$s" "$ev" "$v" "$sp" "$line" >> "$OUT/ceiling_$TAG.tsv"
+  done
+done < <(if [ -n "${LIST:-}" ]; then cat "$LIST"; else printf '%s\n' "$DEFAULT_LIST"; fi)
 touch "$OUT/DONE_$TAG"

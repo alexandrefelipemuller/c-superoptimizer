@@ -360,3 +360,5 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 199. (results) No valid gain on 8; all 3 strcasecmp winners wrong off the workload ((a\|32)==(b\|32), "[" vs "{"); string code needs in-domain off-workload counterexamples | 11_sections_121-125.md | 2639 |
 | 199c. (registered) Array counterexamples off the workload: mutations in CEGIS + 200,000-mutation final check (`fuzzed`) | 11_sections_121-125.md | 2684 |
 | 199c. (results) No wrong winner (6/6 pass byte fuzz); strcasecmp's 3 timed winners rejected in every run; strlen 1.10 (unroll) at the threshold; byte loops give ~1.1x at most | 11_sections_121-125.md | 2714 |
+| 200. (registered) Census of zlib, lz4, SQLite, Mbed TLS, curl, libpng (11/5,766 import); 9 unseen real functions vs hand versions | 11_sections_121-125.md | 2754 |
+| 200. (results) is_cr_or_lf 1.5-1.65x (early exit on text); memsys3Roundup gap 2.75; tables out of reach; int-array timing context misstates char functions (isalpha 1.8x -> 1.1x in a byte-buffer caller) | 11_sections_121-125.md | 2802 |
