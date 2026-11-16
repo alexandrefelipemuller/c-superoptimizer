@@ -349,3 +349,6 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 197. (results) musl 32 → 33 (pointer `char *` is the real gate); ascii_is_unsafe seed 11 won on the search's input sequence only (1.53x there, 0.57x held-out) → confirmation inputs | 11_sections_121-125.md | 2370 |
 | 197b. (registered) Rerun with the confirmation split | 11_sections_121-125.md | 2382 |
 | 197b. (results) No lucky winner (ascii_is_unsafe → reference); isalpha/iscntrl/isspace/ascii_to_bin keep 1.11-3.71x held-out | 11_sections_121-125.md | 2389 |
+| 198. (registered) Ceiling: best hand version vs search on the 27 accepted samples | 11_sections_121-125.md | 2403 |
+| 198. (deviation) 512 repeated inputs let the predictor learn branches (is_leap: original 1.9 vs 5.8 ns); rerun on 65,536 | 11_sections_121-125.md | 2434 |
+| 198. (results) Gaps on 5/27, 3 expressible (filterpc 5.9, setup_salt 7.0, is_leap 1.3); a proved zeroinfnan winner is 5x slower → the timer is part of the bottleneck | 11_sections_121-125.md | 2448 |

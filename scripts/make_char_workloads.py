@@ -5,6 +5,11 @@ two files from the same distribution: `*_search.txt` for the search and
 `*_eval.txt`, held out, for the external measurement.
 
     scripts/make_char_workloads.py OUTDIR
+    scripts/make_char_workloads.py OUTDIR --large 65536
+
+--large N (log 198): instead, held-out `*_eval_large.txt` files of N inputs, so
+an external measurement does not repeat a short sequence the branch predictor
+can learn; text from docs/findings/, hex/b64 from another seed.
 
 text: the bytes (0..255) of two documentation files of this repository;
 hex: uniform over 0-9a-fA-F; b64: uniform over crypt's alphabet ./0-9A-Za-z.
@@ -24,6 +29,16 @@ def write(path, values):
 def main():
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
+    if len(sys.argv) == 4 and sys.argv[2] == "--large":
+        n = int(sys.argv[3])
+        text = b"".join(open(os.path.join("docs/findings", f), "rb").read()
+                        for f in sorted(os.listdir("docs/findings")) if f.endswith(".md"))
+        write(os.path.join(out, "text_eval_large.txt"), list(text[:n]))
+        for kind, alphabet in (("hex", "0123456789abcdefABCDEF"),
+                               ("b64", "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")):
+            rng = random.Random(3)
+            write(os.path.join(out, f"{kind}_eval_large.txt"), [ord(rng.choice(alphabet)) for _ in range(n)])
+        return
     write(os.path.join(out, "text_search.txt"), list(open("README.md", "rb").read()[:N]))
     write(os.path.join(out, "text_eval.txt"), list(open("docs/superopt.md", "rb").read()[:N]))
     alphabets = {"hex": "0123456789abcdefABCDEF",

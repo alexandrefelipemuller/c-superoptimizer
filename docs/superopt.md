@@ -218,6 +218,14 @@ cost-model inputs. Repeated, their branches were memorized by the branch
 predictor, and two branchy candidates timed as 1.24x and 1.42x in the loop
 but ran at 0.34x and 0.92x on fresh data.
 
+512 is not enough either (log 198). Measured on 65,536 inputs that do not
+repeat within a pass, musl's `is_leap` costs 5.8 ns per call, against 1.9 ns
+on 512 repeated inputs. A zeroinfnan winner proved equivalent and timed at
+1.5x on 512 runs at 0.18x. filterpc's branch-free form, 0.54x on 512, runs at
+5.9x. Claims about branchy code should be measured with `c_speedup.py
+--inputs 65536` or a workload file of that size (`make_char_workloads.py OUT
+--large 65536`); the in-loop timer still repeats 512 inputs.
+
 `scripts/c_speedup.py ORIGINAL.c FOUND.c` measures what counts: both compiled
 with gcc -O2 -fwrapv in separate translation units, called through a volatile
 function pointer, with the empty-call overhead subtracted. It takes the
@@ -284,6 +292,7 @@ Inputs the reference fails on are outside the domain everywhere, including
     scripts/c_speedup.py FILE.c X.c                  # compiled speedup
     scripts/c_speedup.py FILE.c X.c --inline --inputs-file W.txt   # on a given workload
     ./algosearch superopt FILE.c --time-top 4 --workload W.txt     # search timed on your inputs (log 195)
+    scripts/run_ceiling_battery.sh OUT TAG          # hand versions vs search winners (log 198)
 
     ./algosearch --problem c:tests/c_samples/array_sum.c --max-n 30 --beam-width 500 \
         --candidates 1500 --max-program-size 150 --seed 2 --c-out found.c
