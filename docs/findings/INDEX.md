@@ -352,3 +352,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 198. (registered) Ceiling: best hand version vs search on the 27 accepted samples | 11_sections_121-125.md | 2403 |
 | 198. (deviation) 512 repeated inputs let the predictor learn branches (is_leap: original 1.9 vs 5.8 ns); rerun on 65,536 | 11_sections_121-125.md | 2434 |
 | 198. (results) Gaps on 5/27, 3 expressible (filterpc 5.9, setup_salt 7.0, is_leap 1.3); a proved zeroinfnan winner is 5x slower → the timer is part of the bottleneck | 11_sections_121-125.md | 2448 |
+| 198. (correction) Six workload rows were on 512 inputs; on 65,536: hexval table 21.7x, isspace 197b winners 0.39x/0.41x (learnt 1024-byte sequence) | 11_sections_121-125.md | 2495 |

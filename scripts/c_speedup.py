@@ -5,15 +5,17 @@ Both are compiled with gcc -O2 -fwrapv in separate translation units and
 called through a volatile function pointer (no inlining across them), on
 the same inputs as the superoptimizer's cost workload: scalar arguments 30%
 in [-64, 64] and 70% over all of int, or arrays of 16-64 values in
-[-50, 50]. Inputs outside the reference's domain (the interpreter reports
-ERROR/TIMEOUT within 1M steps) are dropped. Calls are timed in interleaved
+[-50, 50], 65,536 scalar or 16,384 array inputs per pass (log 198: a short
+repeated set lets the branch predictor learn it). Inputs outside the
+reference's domain (the interpreter reports ERROR/TIMEOUT within 1M steps)
+are dropped. Calls are timed in interleaved
 trials, once per link order (geometric mean; functions and loops aligned to
 64 bytes, since code placement alone shifted one loop by ~25%); the time
 of an empty function with the same signature (call and,
 for arrays, the copy of the input) is subtracted. Results of both functions
 are also compared on every input.
 
-    scripts/c_speedup.py ORIGINAL.c CANDIDATE.c [--inputs 512] [--trials 15] [--seed 1] [--inline]
+    scripts/c_speedup.py ORIGINAL.c CANDIDATE.c [--inputs N] [--trials 15] [--seed 1] [--inline]
 
 --inline: each function is compiled into the timing loop's own translation
 unit (one executable each, run interleaved), so gcc may inline it the way a
@@ -250,7 +252,7 @@ def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
-def measure(original, candidate, algosearch="./algosearch", n_inputs=512, trials=15, seed=1, workdir=None,
+def measure(original, candidate, algosearch="./algosearch", n_inputs=None, trials=15, seed=1, workdir=None,
             inline=False, inputs_file=None):
     head = run([algosearch, "c-import", original])
     if head.returncode != 0:
@@ -261,6 +263,10 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=512, trials
     d = workdir or tempfile.mkdtemp(prefix="c_speedup_")
     os.makedirs(d, exist_ok=True)
     rng = random.Random(seed)
+    if n_inputs is None:
+        # Log 198: one long pass, so the branch predictor cannot learn the
+        # sequence (512 repeated inputs made a 5x regression time as 1.5x).
+        n_inputs = 65536 if abi == "scalars" else 16384
     if inputs_file:
         # A given workload (log 194): one input per line, in --eval format.
         inputs = [l.strip() for l in open(inputs_file) if l.strip()]
@@ -269,7 +275,12 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=512, trials
     with open(os.path.join(d, "inputs.txt"), "w") as f:
         f.write("\n".join(inputs) + "\n")
     ev = run([algosearch, "c-import", original, "--eval", os.path.join(d, "inputs.txt"), "--step-limit", "1000000"])
-    kept = [i for i, r in zip(inputs, ev.stdout.splitlines()) if r not in ("ERROR", "TIMEOUT")][:n_inputs]
+    kept = [i for i, r in zip(inputs, ev.stdout.splitlines()) if r not in ("ERROR", "TIMEOUT")]
+    if inputs_file and 0 < len(kept) < n_inputs:
+        # A short workload is resampled in a random order to the full size:
+        # its distribution, not a sequence short enough to learn (log 198).
+        kept = [rng.choice(kept) for _ in range(n_inputs)]
+    kept = kept[:n_inputs]
     if inline:
         ref_ns, cand_ns, noop = measure_inline(func, abi, returns, params, original, candidate, kept, trials, d)
         return {"func": func, "inputs": len(kept), "ref_ns": ref_ns, "cand_ns": cand_ns, "speedup": ref_ns / cand_ns,
@@ -309,14 +320,16 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("original")
     ap.add_argument("candidate")
-    ap.add_argument("--inputs", type=int, default=512)
+    ap.add_argument("--inputs", type=int, default=None,
+                    help="inputs per pass (default 65536 for scalars, 16384 for arrays; log 198)")
     ap.add_argument("--trials", type=int, default=15)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--algosearch", default="./algosearch")
     ap.add_argument("--workdir", default=None)
     ap.add_argument("--inputs-file", default=None,
                     help="time on these inputs (one per line, as for c-import --eval) instead of random ones; "
-                         "the first --inputs of them on which the original completes are used")
+                         "the first --inputs of them on which the original completes are used; a shorter file is "
+                         "resampled in a random order to --inputs (log 198)")
     ap.add_argument("--inline", action="store_true",
                     help="compile each function into the timing loop's translation unit (gcc may inline it): "
                          "for functions too small to time through a call; no correctness check in this mode")

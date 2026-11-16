@@ -36,7 +36,10 @@ struct SuperoptConfig {
     std::string workDir = "/tmp/algosearch_superopt";
     int timedParents = 6;         // fastest timed programs used as parents
     double timeFraction = 0.5;    // at most this share of the wall clock goes to timing
-    int timingInputs = 512;       // fresh inputs for compiled timing (section 190: 24 let branches be memorized)
+    // Inputs for compiled timing, in one pass that does not repeat within itself
+    // (log 198: with 512 repeated inputs the branch predictor learnt branchy code,
+    // a 5x regression timed as 1.5x). Arrays: at most 16384 (harness buffer).
+    int timingInputs = 65536;
     // Phase 3c (log 190/190b): algorithmic moves in a quarter of the edits; default
     // since 190b (`--no-algorithmic-moves` restores phase 3b).
     bool algorithmicMoves = true;

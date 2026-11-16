@@ -5,12 +5,14 @@
 # not repeat within a pass (random, or *_eval_large.txt from
 # make_char_workloads.py OUT --large 65536).
 #     scripts/run_ceiling_battery.sh OUT TAG    # writes OUT/ceiling_TAG.tsv
+#     ONLY=REGEX scripts/run_ceiling_battery.sh OUT TAG   # only the matching samples
 set -u
 OUT=$1; TAG=$2; H=tests/c_samples_musl_lua/hand
 printf 'sample\tworkload\tvariant\tinline_speedup\tline\n' > "$OUT/ceiling_$TAG.tsv"
 while read s src ev; do
+  [[ $s =~ ${ONLY:-.} ]] || continue
   f=tests/c_samples_musl_lua/$s.c
-  EV="--inputs 65536"; [ "$ev" != random ] && EV="--inputs-file $OUT/${ev}_eval_large.txt"
+  EV="--inputs 65536"; [ "$ev" != random ] && EV="$EV --inputs-file $OUT/${ev}_eval_large.txt"
   for v in self hand 10 11 12; do
     case $v in self) c=$f;; hand) c=$H/$s.c;; *) c=data/$src/$s.seed$v.found.c;; esac
     line=$(python3 scripts/c_speedup.py "$f" "$c" --inline $EV --workdir "$OUT/w_${s}_$v" 2>&1 | tail -1)

@@ -212,7 +212,7 @@ Without the flag, the edits and the random stream are exactly those of phase
 count_digits, clamp, mul_by_add). gcc already turns `mul_by_add`'s loop into a
 multiply, and `clamp` is below timing resolution.
 
-The in-loop timer runs on its own 512 fresh inputs (`timingInputs`), the size
+The in-loop timer runs on its own fresh inputs (`timingInputs`; 512 until log 198), the size
 and distribution of the external measurement. In log 190 it reused the 24
 cost-model inputs. Repeated, their branches were memorized by the branch
 predictor, and two branchy candidates timed as 1.24x and 1.42x in the loop
@@ -222,9 +222,11 @@ but ran at 0.34x and 0.92x on fresh data.
 repeat within a pass, musl's `is_leap` costs 5.8 ns per call, against 1.9 ns
 on 512 repeated inputs. A zeroinfnan winner proved equivalent and timed at
 1.5x on 512 runs at 0.18x. filterpc's branch-free form, 0.54x on 512, runs at
-5.9x. Claims about branchy code should be measured with `c_speedup.py
---inputs 65536` or a workload file of that size (`make_char_workloads.py OUT
---large 65536`); the in-loop timer still repeats 512 inputs.
+5.9x, and two 197b isspace winners measured 3.7x/2.8x on 1024 held-out bytes
+run at 0.39x/0.41x on 65,536 bytes of text. The in-loop timer and
+`c_speedup.py` therefore use one long pass: 65,536 scalar inputs (16,384
+arrays), and a shorter `--workload` / `--inputs-file` is resampled in a random
+order to that size (its distribution, not a sequence the predictor can learn).
 
 `scripts/c_speedup.py ORIGINAL.c FOUND.c` measures what counts: both compiled
 with gcc -O2 -fwrapv in separate translation units, called through a volatile
@@ -240,7 +242,7 @@ self-control of the same function.
 
 ### Workload (log 195)
 
-By default the compiled timing uses 512 random inputs: uniform ints, 30% of
+By default the compiled timing uses 65,536 random inputs (log 198): uniform ints, 30% of
 them small. For a function whose real inputs are narrower, such as characters
 for ctype, give them with `--workload FILE`, one input per line as for
 `c-import --eval`. The in-domain inputs replace the random ones in the timing

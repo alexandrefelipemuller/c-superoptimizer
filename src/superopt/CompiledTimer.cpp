@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
     FILE *f = fopen(argv[1], "r");
     char line[65536];
     int pos = 0;
-    while (fgets(line, sizeof line, f)) {
+    while (h_nin < 65536 && pos + 4096 <= 4000000 && fgets(line, sizeof line, f)) {
         char *p = line, *end;
         h_off[h_nin] = pos; h_len[h_nin] = 0;
         for (;;) { long x = strtol(p, &end, 10); if (end == p) break; h_data[pos++] = (int)x; h_len[h_nin]++; p = end; }

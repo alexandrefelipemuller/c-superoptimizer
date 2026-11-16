@@ -621,17 +621,34 @@ SuperoptResult Superoptimizer::run() {
         // inputs of the same kind). The final winners are therefore confirmed
         // on inputs the search never timed: the other half of the user's
         // workload (alternate inputs), or a second random set.
+        //
+        // Log 198: each set is one long pass with no repeated sequence (65,536
+        // scalar inputs): repeating 512 inputs let the predictor learn the
+        // branches of branchy code. A user workload is split into its even and
+        // odd inputs, and each half is resampled in a random order to the full
+        // size, so the predictor sees the workload's distribution, not a short
+        // sequence it can learn.
         std::vector<std::vector<int>> timing, confirm;
-        const size_t cap = static_cast<size_t>(config_.timingInputs);
-        for (size_t i = 0; i < userWorkload_.size(); ++i) {
-            auto& part = (i % 2 == 0 || userWorkload_.size() == 1) ? timing : confirm;
-            if (part.size() < cap) part.push_back(userWorkload_[i]);
-        }
-        if (userWorkload_.size() == 1) confirm = timing;
         bool scalarAbi = abi.kind == CFunctionAbi::Kind::Scalars;
+        const size_t cap = static_cast<size_t>(scalarAbi ? config_.timingInputs
+                                                         : std::min(config_.timingInputs, 16384));
+        if (!userWorkload_.empty()) {
+            std::vector<std::vector<int>> even, odd;
+            for (size_t i = 0; i < userWorkload_.size(); ++i)
+                (i % 2 == 0 || userWorkload_.size() == 1 ? even : odd).push_back(userWorkload_[i]);
+            if (odd.empty()) odd = even;
+            auto resample = [&](uint64_t salt, const std::vector<std::vector<int>>& from,
+                                std::vector<std::vector<int>>& set) {
+                Random wrng(config_.seed ^ salt);
+                for (size_t i = 0; i < cap; ++i)
+                    set.push_back(from[static_cast<size_t>(wrng.uniformInt(0, static_cast<int>(from.size()) - 1))]);
+            };
+            resample(0x2545f4914f6cdd1dULL, even, timing);
+            resample(0x9e3779b97f4a7c15ULL, odd, confirm);
+        }
         auto randomSet = [&](uint64_t salt, std::vector<std::vector<int>>& set) {
             Random trng(config_.seed ^ salt);
-            for (int tries = 0; set.size() < cap && tries < 20 * config_.timingInputs; ++tries) {
+            for (size_t tries = 0; set.size() < cap && tries < 20 * cap; ++tries) {
                 std::vector<int> in;
                 if (scalarAbi) {
                     in = randomInput(trng, abi, 0);
