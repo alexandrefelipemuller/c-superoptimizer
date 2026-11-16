@@ -294,7 +294,8 @@ Inputs the reference fails on are outside the domain everywhere, including
     scripts/c_speedup.py FILE.c X.c                  # compiled speedup
     scripts/c_speedup.py FILE.c X.c --inline --inputs-file W.txt   # on a given workload
     ./algosearch superopt FILE.c --time-top 4 --workload W.txt     # search timed on your inputs (log 195)
-    scripts/run_ceiling_battery.sh OUT TAG          # hand versions vs search winners (log 198)
+    scripts/run_ceiling_battery.sh OUT TAG          # hand versions vs search winners (log 198; RUNS=DIR for other winners, 198b)
+    # a speedup ratio is comparable only within one session (198b): re-measure the baseline arm alongside
 
     ./algosearch --problem c:tests/c_samples/array_sum.c --max-n 30 --beam-width 500 \
         --candidates 1500 --max-program-size 150 --seed 2 --c-out found.c
