@@ -247,7 +247,12 @@ them small. For a function whose real inputs are narrower, such as characters
 for ctype, give them with `--workload FILE`, one input per line as for
 `c-import --eval`. The in-domain inputs replace the random ones in the timing
 and the model cost, and the first 64 also become tests. Correctness is still
-checked on all inputs. The result is tuned to that workload by design: on
+checked on all inputs, and the counterexample search scans the whole workload
+(log 199). For string code (int arrays holding NUL-terminated text) that is not
+enough: random arrays rarely hold a NUL, so almost nothing outside the workload
+is checked, and all three strcasecmp winners of log 199 were wrong on other
+bytes (`(a | 32) == (b | 32)` treats `[` and `{` as equal). Treat an array
+winner at `equivalence_level tested` as unverified. The result is tuned to that workload by design: on
 text, isspace gains 2.3-2.5x with `if (c >= 33) return 0;` first, which
 would cost on whitespace-heavy input. Without a workload, character functions
 picked candidates that regressed on characters, down to 0.23x (hexval).
@@ -289,6 +294,7 @@ Inputs the reference fails on are outside the domain everywhere, including
     ./algosearch c-import FILE.c --program P --emit # C for another Mini-C program under FILE's ABI
     scripts/c_roundtrip.py tests/c_samples/*.c      # interpreter = original C = regenerated C
     scripts/c_roundtrip.py FILE.c --candidate X.c   # a search result against the original
+    scripts/c_roundtrip.py FILE.c --candidate X.c --inputs-file W.txt   # on given inputs, e.g. strings (log 199)
     scripts/c_census.py --out T.tsv --keep DIR SRC/ # which functions of a code base import on their own
     ./algosearch superopt FILE.c --seconds 60 --out X.c  # phase 3
     scripts/c_speedup.py FILE.c X.c                  # compiled speedup

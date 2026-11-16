@@ -574,6 +574,11 @@ SuperoptResult Superoptimizer::run() {
         }
         for (const auto& in : boundary)
             if (bad(in)) return in;
+        // The whole user workload (log 199): random arrays rarely hold a NUL,
+        // so for string code they are almost all outside the domain, and a
+        // candidate wrong on 7% of real strings passed every other check.
+        for (const auto& in : userWorkload_)
+            if (bad(in)) return in;
         Random r(rng.engine()());
         for (int i = 0; i < 2000; ++i) {
             std::vector<int> in = randomInput(r, abi, 40);

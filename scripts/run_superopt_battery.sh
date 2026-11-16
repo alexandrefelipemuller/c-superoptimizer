@@ -11,6 +11,9 @@ SAMPLES=${SAMPLES:-tests/c_samples/*.c}
 # EVAL_INPUTS (environment, log 195): time the external measurements on this
 # workload file (c_speedup.py --inputs-file) instead of random inputs.
 EV=""; [ -n "${EVAL_INPUTS:-}" ] && EV="--inputs-file $EVAL_INPUTS"
+# RT_INPUTS (environment, log 199): run the equivalence round trip on this
+# file instead of random inputs (strings: random arrays rarely hold a NUL).
+RT=""; [ -n "${RT_INPUTS:-}" ] && RT="--inputs-file $RT_INPUTS"
 # TIME_TOP > 0 (section 189): compiled timing inside the loop. The searches
 # then time code themselves, so they run with JOBS=1 (one at a time).
 mkdir -p "$OUT"
@@ -33,7 +36,7 @@ for f in $SAMPLES; do for seed in $SEEDS; do
     get() { grep -m1 "^$1 " "$log" | cut -d' ' -f2; }
     eq=NONE; sp=""; bo=""; rn=""; cn=""; isp=""; irn=""
     if [ -s "$OUT/$tag.found.c" ]; then
-        chk=$(python3 scripts/c_roundtrip.py "$f" --candidate "$OUT/$tag.found.c" --workdir "$OUT/rt_$tag" | head -1)
+        chk=$(python3 scripts/c_roundtrip.py "$f" --candidate "$OUT/$tag.found.c" $RT --workdir "$OUT/rt_$tag" | head -1)
         case "$chk" in OK*) eq=EQUIVALENT ;; *) eq=NOT_EQUIVALENT ;; esac
         m=$(python3 scripts/c_speedup.py "$f" "$OUT/$tag.found.c" $EV --workdir "$OUT/sp_$tag")
         sp=$(echo "$m" | grep -oE 'speedup [0-9.]+' | cut -d' ' -f2)

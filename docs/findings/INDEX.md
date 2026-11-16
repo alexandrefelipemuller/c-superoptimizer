@@ -355,3 +355,6 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 198. (correction) Six workload rows were on 512 inputs; on 65,536: hexval table 21.7x, isspace 197b winners 0.39x/0.41x (learnt 1024-byte sequence) | 11_sections_121-125.md | 2495 |
 | 198b. (registered) The 27 samples rerun with the 65,536-input in-loop timer, seeds 10-12 | 11_sections_121-125.md | 2520 |
 | 198b. (results) 0/81 below 0.95 (old arm 4); filterpc 13.6x, ascii_is_unsafe 3.6x; gains on 11 samples vs 4; ratios differ 2x across sessions, re-measure baselines in-session | 11_sections_121-125.md | 2537 |
+| 199. (registered) String pilot: strlen, atoi, strcmp, strcasecmp, memcmp, keyhash, sysv_hash, gnu_hash on int arrays | 11_sections_121-125.md | 2603 |
+| 199. (deviation) Wrong strcasecmp code passed: CEGIS random arrays almost never in the string domain; counterexample search now scans the whole workload | 11_sections_121-125.md | 2627 |
+| 199. (results) No valid gain on 8; all 3 strcasecmp winners wrong off the workload ((a\|32)==(b\|32), "[" vs "{"); string code needs in-domain off-workload counterexamples | 11_sections_121-125.md | 2639 |
