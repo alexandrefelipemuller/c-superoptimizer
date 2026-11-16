@@ -12,6 +12,7 @@ Every remaining input must give the same result three times, and at least
 
     scripts/c_roundtrip.py tests/c_samples/*.c [--inputs 2000] [--seed 1]
     scripts/c_roundtrip.py tests/c_samples/f.c --candidate found.c   # a search result vs the original
+    scripts/c_roundtrip.py strlen.c --inputs-file words.txt           # given inputs, e.g. NUL-terminated strings
 
 Exit status 1 if any file fails to import or any result differs.
 """
@@ -134,7 +135,7 @@ def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
-def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout, candidate=None):
+def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout, candidate=None, inputs_file=None):
     name = os.path.splitext(os.path.basename(path))[0]
     head = run([algosearch, "c-import", path])
     if head.returncode != 0:
@@ -168,7 +169,10 @@ def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout
     if r.returncode != 0:
         return False, f"gcc failed on harness: {r.stderr.strip()[:400]}"
 
-    inputs = gen_inputs(abi, params, n_inputs, rng)
+    if inputs_file:
+        inputs = [l.strip() for l in open(inputs_file) if l.strip()][:n_inputs]
+    else:
+        inputs = gen_inputs(abi, params, n_inputs, rng)
     with open(os.path.join(d, "inputs.txt"), "w") as f:
         f.write("\n".join(inputs) + "\n")
     interp = run([algosearch, "c-import", path, "--eval", os.path.join(d, "inputs.txt")])
@@ -214,6 +218,8 @@ def main():
     ap.add_argument("--native-timeout", type=float, default=30, help="seconds per file for the compiled runs")
     ap.add_argument("--min-compared", type=float, default=0.5,
                     help="fail a file if fewer than this fraction of its inputs complete in the interpreter")
+    ap.add_argument("--inputs-file", default=None,
+                    help="use the first --inputs lines of this file (c-import --eval format) instead of random inputs")
     ap.add_argument("--workdir", default=None, help="keep build files here (default: a temp dir)")
     args = ap.parse_args()
     if args.candidate and len(args.files) != 1:
@@ -223,7 +229,7 @@ def main():
     failed = 0
     for path in args.files:
         ok, msg = check(path, args.algosearch, workdir, args.inputs, rng, args.min_compared, args.native_timeout,
-                        args.candidate)
+                        args.candidate, args.inputs_file)
         failed += not ok
         print(f"{'OK  ' if ok else 'FAIL'} {os.path.basename(path)}: {msg}")
     print(f"{len(args.files) - failed}/{len(args.files)} passed (build files in {workdir})")
