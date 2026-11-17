@@ -52,6 +52,10 @@ struct SuperoptConfig {
     // (0..255, or -128..127) in a loop over a byte buffer, the context of a
     // caller scanning text; "int" passes every argument from an int array.
     std::string timingContext = "int";
+    // Log 202: the final confirmation also times each winner in the other
+    // context (byte <-> int) when the inputs are all bytes, and keeps the
+    // smaller speedup: a gain must hold for both callers.
+    bool crossContextConfirm = false;
 };
 
 struct SuperoptResult {
@@ -85,6 +89,9 @@ struct SuperoptResult {
     std::string equivalence = "reference";
     int exhaustiveRejected = 0;  // timed winners refuted by the exhaustive check
     int fuzzRejected = 0;        // timed array winners refuted by the mutation fuzz (log 199c)
+    int crossContextRejected = 0;      // winners below the threshold in the other context (log 202)
+    double crossContextSelfControl = 0;  // the original against itself there (0: not used)
+    double crossContextSpeedup = 0;      // the returned winner's speedup there (0: not used)
     Program modelBest;             // what the model alone would have returned
     long long modelBestCost = 0;
 };

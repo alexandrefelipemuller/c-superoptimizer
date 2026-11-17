@@ -365,3 +365,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 201. (registered) `--timing-context byte`: byte-buffer timing inside the search for byte-input unary functions; int vs byte on 9 samples, judged in c_byte_caller | 11_sections_121-125.md | 2865 |
 | 201. (results) Byte context finds the same 4 gains as int, accepts hex_to_int 0.88x (1.15 in-loop); byte callers disagree up to 30%; stays opt-in; c_byte_caller position bias fixed | 11_sections_121-125.md | 2897 |
 | 200. (correction) Byte-caller re-time had a position bias: isalpha 1.36 (not 1.10), ascii_to_bin byte-caller gain withdrawn | 11_sections_121-125.md | 2943 |
+| 202. (registered) `--cross-context-confirm`: winners of byte-input unary functions must gain in both int and byte contexts; arms int / int+cross / byte+cross | 11_sections_121-125.md | 2952 |

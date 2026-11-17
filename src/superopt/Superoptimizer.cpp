@@ -671,7 +671,7 @@ SuperoptResult Superoptimizer::run() {
     result.trajectory.push_back({0.0, bestCost});
 
     // Phase 3b: compiled timing against the original, in one process.
-    std::unique_ptr<CompiledTimer> timer, confirmTimer;
+    std::unique_ptr<CompiledTimer> timer, confirmTimer, altConfirmTimer;
     std::vector<Timed> timed;
     std::unordered_set<std::string> timedKeys;
     auto emit = [&](const Stmt& p) -> std::optional<std::string> {
@@ -736,20 +736,25 @@ SuperoptResult Superoptimizer::run() {
         }
         // Log 201: a unary function whose timing inputs are all bytes is timed in
         // a loop over a byte buffer (unsigned when they fit 0..255).
-        std::string byteType;
-        if (config_.timingContext == "byte" && scalarAbi && abi.params.size() == 1) {
+        std::string byteType, byteEligible;
+        if (scalarAbi && abi.params.size() == 1) {
             bool u8 = true, s8 = true;
             for (const auto* set : {&timing, &confirm})
                 for (const auto& in : *set) {
                     u8 = u8 && in[0] >= 0 && in[0] <= 255;
                     s8 = s8 && in[0] >= -128 && in[0] <= 127;
                 }
-            byteType = u8 ? "unsigned char" : s8 ? "signed char" : "";
+            byteEligible = u8 ? "unsigned char" : s8 ? "signed char" : "";
+            if (config_.timingContext == "byte") byteType = byteEligible;
         }
         result.timingContext = byteType.empty() ? "int" : byteType == "unsigned char" ? "uchar" : "schar";
         timer = std::make_unique<CompiledTimer>(config_.originalSource, abi, timing, config_.workDir, byteType);
         confirmTimer = std::make_unique<CompiledTimer>(config_.originalSource, abi, confirm, config_.workDir + "/confirm",
                                                        byteType);
+        if (config_.crossContextConfirm && !byteEligible.empty())
+            altConfirmTimer = std::make_unique<CompiledTimer>(config_.originalSource, abi, confirm,
+                                                              config_.workDir + "/confirm_alt",
+                                                              byteType.empty() ? byteEligible : "");
         // Noise: the original against itself, on both input sets.
         double spread = 0;
         auto selfControl = [&](CompiledTimer& tm) {
@@ -765,6 +770,11 @@ SuperoptResult Superoptimizer::run() {
         };
         result.selfControl = selfControl(*timer);
         result.confirmSelfControl = selfControl(*confirmTimer);
+        if (altConfirmTimer) {
+            double keep = spread;
+            result.crossContextSelfControl = selfControl(*altConfirmTimer);
+            spread = keep;  // the noise threshold stays that of the timing context
+        }
         result.noiseThreshold = std::max(0.03, 2.0 * spread);
         if (auto c = emit(problem_.referenceProgram())) {
             CompiledTimer::Timing t = timer->time(*c);
@@ -943,6 +953,25 @@ SuperoptResult Superoptimizer::run() {
             }
             if (r.size() < 3) continue;
             std::sort(r.begin(), r.end());
+            double alt = 0;
+            if (altConfirmTimer && src && r[1] > 1.0 + result.noiseThreshold && r[1] > result.measuredSpeedup) {
+                std::vector<double> a;
+                for (int rep = 0; rep < 3; ++rep) {
+                    CompiledTimer::Timing t = altConfirmTimer->time(*src, 21);
+                    ++result.timings;
+                    if (t.ok) a.push_back(t.speedup);
+                }
+                if (a.size() < 3) continue;
+                std::sort(a.begin(), a.end());
+                alt = a[1];
+                if (alt <= 1.0 + result.noiseThreshold) {
+                    ++result.crossContextRejected;
+                    if (config_.verbose)
+                        std::cerr << "cross-context check rejects a timed winner: " << r[1] << " vs " << alt << "\n";
+                    continue;
+                }
+                r[1] = std::min(r[1], alt);
+            }
             if (r[1] > 1.0 + result.noiseThreshold && r[1] > result.measuredSpeedup) {
                 if (exhaustiveOk && src) {
                     CompiledTimer::Exhaustive x = timer->exhaustive(*src);
@@ -977,6 +1006,7 @@ SuperoptResult Superoptimizer::run() {
                 result.best = timed[k].program->clone();
                 result.bestCost = timed[k].cost;
                 result.measuredSpeedup = r[1];
+                result.crossContextSpeedup = alt;
             }
         }
     }
