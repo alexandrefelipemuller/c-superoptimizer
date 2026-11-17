@@ -56,6 +56,13 @@ struct SuperoptConfig {
     // context (byte <-> int) when the inputs are all bytes, and keeps the
     // smaller speedup: a gain must hold for both callers.
     bool crossContextConfirm = false;
+    // Log 203: two more phase 3c moves, a branch merge (if (c) R = K; else
+    // R = E(x) -> if (c) x = a; R = E(x)) and a divisibility split
+    // (x % 400 == 0 -> x % 16 == 0 & x % 25 == 0); and one correct mutant made
+    // by a phase 3c move is timed per generation before the beam is cut (the
+    // model does not see mispredictions, so such a rewrite can rank below
+    // the beam's equivalents and never be timed).
+    bool reachMoves = false;
 };
 
 struct SuperoptResult {
@@ -130,10 +137,11 @@ private:
 // loop -> if, strength reduction by powers of two) to a quarter of the
 // edits; off, the edits are exactly those of phase 3.
 Program mutateForSuperopt(const Stmt& program, int numVars, int arity, uint64_t seed, bool algorithmic = false,
-                          bool returnsValue = true);
+                          bool returnsValue = true, bool reach = false, bool* structural = nullptr);
 
 // One specific phase 3c move (0 unroll, 1 branch-free select, 2 early exit,
-// 3 loop -> if, 4 strength reduction), for tests; null when it does not apply.
+// 3 loop -> if, 4 strength reduction, 5 branch merge, 6 divisibility split,
+// log 203), for tests; null when it does not apply.
 Program applyAlgorithmicMove(const Stmt& program, int move, int numVars, int arity, uint64_t seed,
                              bool returnsValue = true);
 

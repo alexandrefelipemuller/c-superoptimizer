@@ -53,12 +53,62 @@ bool isComparison(ExprKind k) {
            k == ExprKind::Ne;
 }
 
+void collectVars(const Expr* e, std::set<int>& out) {
+    if (!e) return;
+    if (e->kind == ExprKind::Var) out.insert(e->varIndex);
+    collectVars(e->lhs.get(), out);
+    collectVars(e->rhs.get(), out);
+}
+
+void collectConsts(const Expr* e, std::set<long long>& out);
+
+// Log 203: which branch of an if/else sets a result to a constant while the
+// other sets the same result (a variable, or arr[k]) to a non-constant
+// expression, each optionally followed by `return`: 0 the then-branch, 1 the
+// else-branch, -1 neither.
+int constantBranch(const Stmt& st) {
+    if (st.body.empty() || st.body.size() != st.elseBody.size() || st.body.size() > 2) return -1;
+    if (st.body.size() == 2 &&
+        (st.body[1]->kind != StmtKind::Return || st.elseBody[1]->kind != StmtKind::Return))
+        return -1;
+    const Stmt& a = *st.body[0];
+    const Stmt& b = *st.elseBody[0];
+    if (a.kind != b.kind) return -1;
+    if (a.kind == StmtKind::Assign) {
+        if (a.varIndex != b.varIndex) return -1;
+    } else if (a.kind == StmtKind::AssignArray) {
+        if (a.indexExpr->kind != ExprKind::IntConst || b.indexExpr->kind != ExprKind::IntConst ||
+            a.indexExpr->intValue != b.indexExpr->intValue)
+            return -1;
+    } else {
+        return -1;
+    }
+    bool ka = a.valueExpr->kind == ExprKind::IntConst, kb = b.valueExpr->kind == ExprKind::IntConst;
+    if (ka == kb) return -1;
+    return ka ? 0 : 1;
+}
+
+// Log 203: `x % c == 0` or `!= 0` (either side order) with c = 2^p * b, p >= 1, b > 1 odd.
+bool splittableModTest(const Expr& e) {
+    if (e.kind != ExprKind::Eq && e.kind != ExprKind::Ne) return false;
+    const Expr* mod = e.lhs->kind == ExprKind::Mod ? e.lhs.get() : e.rhs->kind == ExprKind::Mod ? e.rhs.get() : nullptr;
+    const Expr* zero = mod == e.lhs.get() ? e.rhs.get() : e.lhs.get();
+    if (!mod || zero->kind != ExprKind::IntConst || zero->intValue != 0) return false;
+    if (mod->rhs->kind != ExprKind::IntConst) return false;
+    int c = mod->rhs->intValue;
+    if (c <= 0 || c % 2 != 0) return false;
+    while (c % 2 == 0) c /= 2;
+    return c > 1;
+}
+
 struct Mutator {
     Random rng;
     int numVars;
     int arity;
     bool algorithmic = false;  // phase 3c moves (log 190)
     bool returnsValue = true;
+    bool reach = false;        // log 203: branch merge and modulus split among the phase 3c moves
+    bool structural = false;   // some applied edit was a phase 3c move
 
     template <class T>
     T& pick(std::vector<T>& v) {
@@ -100,7 +150,7 @@ struct Mutator {
     // than one node. Unrolling is exact; the others are checked by the tests
     // like any mutant.
     bool algorithmicOnce(Slots& s, int which = -1) {
-        switch (which >= 0 ? which : rng.uniformInt(0, 4)) {
+        switch (which >= 0 ? which : rng.uniformInt(0, reach ? 6 : 4)) {
             case 0: {  // unroll a loop twice: while (c) { B; if (!c) break; B }
                 auto w = sites(s, StmtKind::While);
                 if (w.empty()) return false;
@@ -168,6 +218,61 @@ struct Mutator {
                 (*l)[i] = makeIf(std::move(loop->cond), std::move(loop->body));
                 return true;
             }
+            case 5: {  // merge a constant branch: if (c) R = K; else R = E(x)  ->  if (c) x = a; R = E(x)
+                std::vector<std::pair<std::vector<StmtPtr>*, size_t>> ok;
+                for (auto [l, i] : sites(s, StmtKind::If))
+                    if (constantBranch(*(*l)[i]) >= 0) ok.push_back({l, i});
+                if (ok.empty()) return false;
+                auto [l, i] = ok[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(ok.size()) - 1))];
+                StmtPtr st = std::move((*l)[i]);
+                bool constThen = constantBranch(*st) == 0;
+                std::vector<StmtPtr>& kb = constThen ? st->body : st->elseBody;
+                std::vector<StmtPtr>& eb = constThen ? st->elseBody : st->body;
+                std::set<int> vars;
+                collectVars(eb[0]->valueExpr.get(), vars);
+                if (vars.empty()) {
+                    (*l)[i] = std::move(st);
+                    return false;
+                }
+                std::vector<int> vs(vars.begin(), vars.end());
+                int x = pick(vs);
+                // a: the constant result itself, or a constant of the condition +-1
+                // (memsys3Roundup: n <= 12 ? 12 : E(n), and E(12) == 12).
+                std::set<long long> cs;
+                collectConsts(st->cond.get(), cs);
+                std::vector<int> as{kb[0]->valueExpr->intValue};
+                for (long long c : cs)
+                    for (long long d = -1; d <= 1; ++d) as.push_back(static_cast<int>(c + d));
+                int a = pick(as);
+                ExprPtr cond = constThen ? std::move(st->cond)
+                                         : makeBinOp(ExprKind::Eq, std::move(st->cond), makeIntConst(0));
+                std::vector<StmtPtr> setX;
+                setX.push_back(makeAssign(x, makeIntConst(a)));
+                std::vector<StmtPtr> out;
+                out.push_back(makeIf(std::move(cond), std::move(setX)));
+                for (auto& b : eb) out.push_back(std::move(b));
+                l->erase(l->begin() + static_cast<long>(i));
+                l->insert(l->begin() + static_cast<long>(i), std::make_move_iterator(out.begin()),
+                          std::make_move_iterator(out.end()));
+                return true;
+            }
+            case 6: {  // split a divisibility test: x % (2^p * b) == 0  ->  (x % 2^p == 0) & (x % b == 0)
+                std::vector<ExprPtr*> ok;
+                for (auto* e : s.exprs)
+                    if (splittableModTest(**e)) ok.push_back(e);
+                if (ok.empty()) return false;
+                ExprPtr& e = *pick(ok);
+                bool modLeft = e->lhs->kind == ExprKind::Mod;
+                const Expr& mod = modLeft ? *e->lhs : *e->rhs;
+                int c = mod.rhs->intValue, a = 1;
+                while (c % (2 * a) == 0) a *= 2;
+                ExprKind k = e->kind;
+                auto test = [&](int m) {
+                    return makeBinOp(k, makeBinOp(ExprKind::Mod, mod.lhs->clone(), makeIntConst(m)), makeIntConst(0));
+                };
+                e = makeBinOp(k == ExprKind::Eq ? ExprKind::BitAnd : ExprKind::BitOr, test(a), test(c / a));
+                return true;
+            }
             default: {  // strength reduction by a power of two: * -> <<, / -> >>, % -> &
                 std::vector<ExprPtr*> red;
                 for (auto* e : s.exprs) {
@@ -200,7 +305,11 @@ struct Mutator {
     bool once(Stmt& root) {
         Slots s;
         collect(root, s);
-        if (algorithmic && rng.chance(0.25)) return algorithmicOnce(s);
+        if (algorithmic && rng.chance(0.25)) {
+            bool ok = algorithmicOnce(s);
+            structural = structural || ok;
+            return ok;
+        }
         std::vector<std::vector<StmtPtr>*> nonEmpty;
         for (auto* l : s.lists)
             if (!l->empty()) nonEmpty.push_back(l);
@@ -448,6 +557,7 @@ struct Candidate {
     int fails = 0;
     int size = 0;
     bool fromTimed = false;  // a mutant of a timed, measured-fast parent
+    bool structural = false; // made by a phase 3c move (log 203)
 };
 
 struct Timed {
@@ -460,20 +570,21 @@ struct Timed {
 }  // namespace
 
 Program mutateForSuperopt(const Stmt& program, int numVars, int arity, uint64_t seed, bool algorithmic,
-                          bool returnsValue) {
-    Mutator m{Random(seed), numVars, arity, algorithmic, returnsValue};
+                          bool returnsValue, bool reach, bool* structural) {
+    Mutator m{Random(seed), numVars, arity, algorithmic, returnsValue, reach};
     Program p = program.clone();
     int edits = 1;
     while (edits < 4 && m.rng.chance(0.35)) ++edits;
     for (int i = 0; i < edits; ++i)
         for (int tries = 0; tries < 8 && !m.once(*p); ++tries) {
         }
+    if (structural) *structural = m.structural;
     return p;
 }
 
 Program applyAlgorithmicMove(const Stmt& program, int move, int numVars, int arity, uint64_t seed,
                              bool returnsValue) {
-    Mutator m{Random(seed), numVars, arity, true, returnsValue};
+    Mutator m{Random(seed), numVars, arity, true, returnsValue, true};
     Program p = program.clone();
     Slots s;
     collect(*p, s);
@@ -782,6 +893,26 @@ SuperoptResult Superoptimizer::run() {
         }
         result.timings = 7;
     }
+    // Times the candidates pool[picks] (correct ones only) into `timed`.
+    auto timePicks = [&](const std::vector<Candidate>& pool, const std::vector<size_t>& picks) {
+        auto t0 = Clock::now();
+        for (size_t i : picks) {
+            const Candidate& c = pool[i];
+            timedKeys.insert(c.key);
+            if (counterexample(*c.program)) continue;
+            auto src = emit(*c.program);
+            if (!src) continue;
+            CompiledTimer::Timing t = timer->time(*src);
+            ++result.timings;
+            if (!t.ok) continue;
+            timed.push_back({c.program->clone(), c.key, t.speedup, c.cost});
+            if (config_.verbose)
+                std::cout << "[superopt] timed " << t.speedup << "x (model cost " << c.cost << ", size "
+                          << c.program->size() << ")\n";
+        }
+        std::sort(timed.begin(), timed.end(), [](const Timed& a, const Timed& b) { return a.speedup > b.speedup; });
+        result.timingSeconds += std::chrono::duration<double>(Clock::now() - t0).count();
+    };
     // Times up to timeTopK untimed correct candidates of the beam: the
     // model's best, mutants of measured-fast parents, then random ones (the
     // model alone is a poor guide, log 188b). Each is checked for
@@ -804,23 +935,21 @@ SuperoptResult Superoptimizer::run() {
             size_t i = static_cast<size_t>(rng.uniformInt(0, static_cast<int>(pool.size()) - 1));
             if (untimed(i)) picks.push_back(i);
         }
-        auto t0 = Clock::now();
-        for (size_t i : picks) {
-            const Candidate& c = pool[i];
-            timedKeys.insert(c.key);
-            if (counterexample(*c.program)) continue;
-            auto src = emit(*c.program);
-            if (!src) continue;
-            CompiledTimer::Timing t = timer->time(*src);
-            ++result.timings;
-            if (!t.ok) continue;
-            timed.push_back({c.program->clone(), c.key, t.speedup, c.cost});
-            if (config_.verbose)
-                std::cout << "[superopt] timed " << t.speedup << "x (model cost " << c.cost << ", size "
-                          << c.program->size() << ")\n";
-        }
-        std::sort(timed.begin(), timed.end(), [](const Timed& a, const Timed& b) { return a.speedup > b.speedup; });
-        result.timingSeconds += std::chrono::duration<double>(Clock::now() - t0).count();
+        timePicks(pool, picks);
+    };
+    // Log 203 (reach moves): the model does not see branch mispredictions, so
+    // a correct structural rewrite (e.g. a clamp in place of a branch) can
+    // cost more than the beam's equivalents and drop out before it is timed.
+    // One such candidate per generation is timed before the beam is cut.
+    auto timeStructural = [&](std::vector<Candidate>& pool) {
+        if (!timer || !config_.reachMoves) return;
+        if (result.timingSeconds > config_.timeFraction * std::max(1.0, elapsed())) return;
+        std::vector<size_t> cands;
+        for (size_t i = 0; i < pool.size(); ++i)
+            if (pool[i].structural && !timedKeys.count(pool[i].key)) cands.push_back(i);
+        if (cands.empty()) return;
+        std::vector<size_t> picks{cands[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(cands.size()) - 1))]};
+        timePicks(pool, picks);
     };
 
     while (elapsed() < config_.wallSeconds) {
@@ -842,7 +971,8 @@ SuperoptResult Superoptimizer::run() {
             for (int m = 0; m < config_.mutantsPerParent; ++m) {
                 Candidate c;
                 c.program = mutateForSuperopt(*parent->program, numVars, arity, rng.engine()(),
-                                              config_.algorithmicMoves, abi.returnsValue);
+                                              config_.algorithmicMoves, abi.returnsValue, config_.reachMoves,
+                                              &c.structural);
                 c.fromTimed = parent->fromTimed;
                 c.size = c.program->size();
                 if (c.size > maxSize) continue;
@@ -860,6 +990,7 @@ SuperoptResult Superoptimizer::run() {
                 }
             }
         }
+        timeStructural(fresh);
         for (auto& c : fresh) beam.push_back(std::move(c));
         std::sort(beam.begin(), beam.end(), [](const Candidate& a, const Candidate& b) {
             return a.cost != b.cost ? a.cost < b.cost : a.size < b.size;

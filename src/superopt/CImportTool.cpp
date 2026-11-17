@@ -170,6 +170,7 @@ int runSuperoptTool(int argc, char** argv) {
         else if (a == "--work-dir") cfg.workDir = next();
         else if (a == "--workload") workloadPath = next();
         else if (a == "--cross-context-confirm") cfg.crossContextConfirm = true;
+        else if (a == "--reach-moves") cfg.reachMoves = true;
         else if (a == "--timing-context") {
             cfg.timingContext = next();
             if (cfg.timingContext != "int" && cfg.timingContext != "byte") {
@@ -186,7 +187,7 @@ int runSuperoptTool(int argc, char** argv) {
     }
     if (file.empty()) {
         std::cerr << "usage: algosearch superopt FILE.c [--func NAME] [--seconds 30] [--beam 40] [--mutants 12] "
-                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves] [--workload INPUTS] [--timing-context int|byte] [--cross-context-confirm]\n";
+                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves] [--workload INPUTS] [--timing-context int|byte] [--cross-context-confirm] [--reach-moves]\n";
         return 1;
     }
     try {
@@ -248,7 +249,10 @@ int runSuperoptTool(int argc, char** argv) {
         // Timed mode with no measurable gain: the original text itself, not
         // the reference re-emitted from Mini-C, which can compile worse (log
         // 191: sat_add's `&&` became `&`, 0.54x).
-        bool original = cfg.timeTopK > 0 && printStmt(*r.best) == printStmt(problem.referenceProgram());
+        // Log 202: unless the re-emitted reference itself was confirmed faster
+        // (equivalence_level set), then it is the answer.
+        bool original = cfg.timeTopK > 0 && r.equivalence == "reference" &&
+                        printStmt(*r.best) == printStmt(problem.referenceProgram());
         if (original) c = source;
         std::cout << "returned " << (original ? "original" : "candidate") << "\n--- C\n" << c;
         if (!outPath.empty()) std::ofstream(outPath) << c;

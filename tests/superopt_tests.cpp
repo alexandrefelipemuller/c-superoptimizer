@@ -264,3 +264,41 @@ TEST(reference_problem_errors_outside_its_domain_are_not_failures) {
     std::string reason;
     CHECK(verifyGeneralization(problem, problem.referenceProgram(), 1'000'000, reason, false));
 }
+
+TEST(superopt_branch_merge_move_reaches_the_clamp) {
+    // Log 203: memsys3Roundup, if (n <= 12) 12 else ((n + 11) & ~7) - 4: with
+    // n clamped to 12 the else expression gives 12, so the if becomes a clamp.
+    Program round = parseProgram(
+        "v1 = arr[0];\nif ((v1 <= 12)) {\n  arr[0] = 12;\n  return;\n} else {\n  arr[0] = (((v1 + 11) & (7 ^ -1)) - 4);\n"
+        "  return;\n}\n");
+    CHECK(round != nullptr);
+    std::vector<std::vector<int>> inputs;
+    for (int x : {-100, -1, 0, 1, 11, 12, 13, 14, 19, 20, 21, 100, 4096, 65537}) inputs.push_back({x});
+    int exact = 0;
+    for (uint64_t seed = 1; seed <= 40; ++seed) {
+        Program m = applyAlgorithmicMove(*round, 5, 2, 1, seed);
+        CHECK(m != nullptr);
+        if (sameBehaviour(*round, *m, inputs, 2)) {
+            ++exact;
+            CHECK(printStmt(*m).find("else") == std::string::npos);
+        }
+    }
+    CHECK(exact > 0);
+}
+
+TEST(superopt_divisibility_split_move_is_exact) {
+    Program leap = parseProgram("v1 = arr[0];\narr[0] = (((v1 % 400) == 0) + ((v1 % 100) != 0));\n");
+    std::vector<std::vector<int>> inputs;
+    for (int x : {0, 1, 4, 16, 25, 100, 200, 300, 400, 800, 1900, 2000, -400, -100, -25, 2147483647, -2147483647 - 1})
+        inputs.push_back({x});
+    for (uint64_t seed = 1; seed <= 8; ++seed) {
+        Program m = applyAlgorithmicMove(*leap, 6, 2, 1, seed);
+        CHECK(m != nullptr);
+        CHECK(sameBehaviour(*leap, *m, inputs, 2));
+        std::string text = printStmt(*m);
+        CHECK(text.find("% 16") != std::string::npos || text.find("% 4)") != std::string::npos);
+        CHECK(text.find("% 25") != std::string::npos);
+    }
+    Program odd = parseProgram("v1 = arr[0];\narr[0] = ((v1 % 9) == 0);\n");
+    CHECK(applyAlgorithmicMove(*odd, 6, 2, 1, 1) == nullptr);
+}
