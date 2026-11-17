@@ -171,6 +171,7 @@ int runSuperoptTool(int argc, char** argv) {
         else if (a == "--workload") workloadPath = next();
         else if (a == "--cross-context-confirm") cfg.crossContextConfirm = true;
         else if (a == "--reach-moves") cfg.reachMoves = true;
+        else if (a == "--no-reach-moves") cfg.reachMoves = false;
         else if (a == "--timing-context") {
             cfg.timingContext = next();
             if (cfg.timingContext != "int" && cfg.timingContext != "byte") {
@@ -187,7 +188,7 @@ int runSuperoptTool(int argc, char** argv) {
     }
     if (file.empty()) {
         std::cerr << "usage: algosearch superopt FILE.c [--func NAME] [--seconds 30] [--beam 40] [--mutants 12] "
-                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves] [--workload INPUTS] [--timing-context int|byte] [--cross-context-confirm] [--reach-moves]\n";
+                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves] [--workload INPUTS] [--timing-context int|byte] [--cross-context-confirm] [--no-reach-moves]\n";
         return 1;
     }
     try {

@@ -17,9 +17,9 @@ Interface gaps (planned 2026-11-13), and their status:
 | 2 | `ReferenceProblem`: the original function is the oracle | done (log 187) |
 | 3 | cost model; search from the reference, objective cost given correctness; compiled speedup measurement | done (log 188-188b): one real gain; the uncalibrated model does not predict compiled time |
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
-| 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs |
+| 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs. Reach moves + structural timing (203, default): memsys3Roundup gap closed, 12 vs 9 gains on 36 samples |
 | 4 | larger functions and real code, in small steps. 4a: constant `#define`, `INT_MAX`/`INT_MIN`, inlined `return expr;` helpers, `continue` in any loop, target picked automatically | 4a done (log 191): 8 real-style samples import exactly; 1 gain of 6 measurable; no gain returns the original text |
-| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200); in-loop byte context, opt-in (201) |
+| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200); in-loop byte context, opt-in (201); cross-context confirmation, opt-in (202) |
 | 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | started (log 192): boundary inputs in CEGIS; unary total functions checked on all 2^32 arguments compiled; array functions: whole workload + workload mutations in CEGIS, 200,000-mutation final check, level `fuzzed` (199/199c) |
 | 6 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -204,7 +204,18 @@ shape of the algorithm rather than one node:
 - insert an early exit: `if (c) break;` in a loop, or `if (c) return E;`;
 - a loop becomes an `if` (one iteration);
 - strength reduction by powers of two (`*` to `<<`, `/` to `>>`, `%` to `&`),
-  valid only for non-negative operands, which the tests decide.
+  valid only for non-negative operands, which the tests decide;
+- (log 203, `--reach-moves`, default; `--no-reach-moves` turns it off) branch
+  merge: `if (c) R = K; else R = E(x)` becomes `if (c) x = a; R = E(x)`, with
+  `a` K or a constant of c +- 1 (memsys3Roundup's clamp);
+- (log 203) divisibility split, exact: `x % (2^p b) == 0` becomes
+  `(x % 2^p == 0) & (x % b == 0)` (`!=`: `|`).
+
+With `--reach-moves`, one correct mutant made by a phase 3c move is also timed
+per generation, before the beam is cut. The model cost does not see
+mispredictions, so a branch replaced by a clamp can rank below the beam's
+equivalents and never be timed: memsys3Roundup's clamp (3.96x) was produced
+and dropped until this was added.
 
 Without the flag, the edits and the random stream are exactly those of phase
 3. `tests/c_samples_set2/` holds 8 larger samples with known better forms

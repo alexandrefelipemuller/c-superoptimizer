@@ -61,8 +61,9 @@ struct SuperoptConfig {
     // (x % 400 == 0 -> x % 16 == 0 & x % 25 == 0); and one correct mutant made
     // by a phase 3c move is timed per generation before the beam is cut (the
     // model does not see mispredictions, so such a rewrite can rank below
-    // the beam's equivalents and never be timed).
-    bool reachMoves = false;
+    // the beam's equivalents and never be timed). Default since log 203
+    // (`--no-reach-moves` restores 202's search).
+    bool reachMoves = true;
 };
 
 struct SuperoptResult {
