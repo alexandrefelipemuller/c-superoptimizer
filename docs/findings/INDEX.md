@@ -370,3 +370,5 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 203. (registered) `--reach-moves`: branch merge + divisibility split + structural timing; memsys3Roundup/is_leap gaps; setup_salt out of scope (serial chain, needs bit-reversal idiom) | 11_sections_121-125.md | 3024 |
 | 203. (results) memsys3Roundup closed (3.96x, 3/3 seeds), 12 vs 9 gains, no regression; swapc gain is inlining context; is_leap not reached; `--reach-moves` default | 11_sections_121-125.md | 3060 |
 | 204. (registered) Scalar regions: census of 8 code bases (1,048 unique importable regions in 14,263 functions); 200 census denominator corrected (struct headers skipped); pilot on 40 regions | 11_sections_121-125.md | 3111 |
+| 204. (results) 17/40 regions gain on uniform random inputs (16/30 branchy); wrong 2-input winner (pair boundaries + scalar fuzz added) and a hang (bounded domain sampling) fixed | 11_sections_121-125.md | 3164 |
+| 204c. (registered) The 10 two-input regions rerun with the fixed checks | 11_sections_121-125.md | 3206 |

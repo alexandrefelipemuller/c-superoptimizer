@@ -456,6 +456,25 @@ void collectConsts(const Stmt& s, std::set<long long>& out) {
 // up to that limit. musl's is_leap guards `y > INT_MAX - 1900`; random and
 // grid inputs never reach that region, and candidates without the guard
 // passed every test.
+// Log 204: constants c, c +- 1..2, sums and differences of two constants
+// (+- 1), and 0, +-1, INT_MIN, INT_MAX: where a multi-argument expression's
+// comparisons change.
+std::vector<int> derivedConstants(const std::set<long long>& consts) {
+    std::set<long long> v = {0, 1, -1, INT_MIN, INT_MAX};
+    for (long long c : consts)
+        for (long long d = -2; d <= 2; ++d) v.insert(c + d);
+    for (long long a : consts)
+        for (long long b : consts)
+            for (long long d = -1; d <= 1; ++d) {
+                v.insert(a + b + d);
+                v.insert(a - b + d);
+            }
+    std::vector<int> out;
+    for (long long x : v)
+        if (x >= INT_MIN && x <= INT_MAX) out.push_back(static_cast<int>(x));
+    return out;
+}
+
 std::vector<std::vector<int>> boundaryInputs(const Stmt& reference, const CFunctionAbi& abi) {
     std::vector<std::vector<int>> res;
     if (abi.kind != CFunctionAbi::Kind::Scalars) return res;
@@ -479,6 +498,22 @@ std::vector<std::vector<int>> boundaryInputs(const Stmt& reference, const CFunct
                 res.push_back(in);
                 if (arity == 1) break;
             }
+    }
+    // Log 204: two arguments at derived constants together. `ex + 120 < ey ||
+    // ey == 0x7fff` minus its `||` term is wrong only at ey = 0x7fff with
+    // ex >= 0x7fff - 120: no single-argument boundary and no random pair finds it.
+    if (arity >= 2) {
+        std::vector<int> d = derivedConstants(consts);
+        for (size_t i = 0; i < arity; ++i)
+            for (size_t j = i + 1; j < arity; ++j)
+                for (int a : d)
+                    for (int b : d) {
+                        if (res.size() >= 120000) return res;
+                        std::vector<int> in(arity, 0);
+                        in[i] = a;
+                        in[j] = b;
+                        res.push_back(in);
+                    }
     }
     return res;
 }
@@ -626,7 +661,10 @@ Superoptimizer::Superoptimizer(const ReferenceProblem& problem, SuperoptConfig c
     size_t costSize = scalars ? 64u : 24u;
     for (size_t i = 0; !userWorkload_.empty() && i < costSize; ++i)
         workload_.push_back(userWorkload_[i * userWorkload_.size() / costSize]);
-    while (workload_.size() < costSize) {
+    // Log 204: bounded. A function defined on a sliver of the inputs (a shift
+    // by `150 - e`, defined for 32 values of e) drew random inputs forever;
+    // the rest is filled from the in-domain tests.
+    for (long tries = 0; workload_.size() < costSize && tries < 200000; ++tries) {
         std::vector<int> in;
         if (scalars) {
             in = randomInput(rng, abi, 0);
@@ -636,6 +674,8 @@ Superoptimizer::Superoptimizer(const ReferenceProblem& problem, SuperoptConfig c
         }
         if (problem_.expected(in)) workload_.push_back(in);
     }
+    for (size_t i = 0; workload_.size() < costSize && !tests_.empty(); ++i)
+        workload_.push_back(tests_[(i * 7919) % tests_.size()].input);
     // Step budgets per input, relative to the reference on that input: a
     // mutant stuck in a loop costs a few times the reference, not a global cap.
     for (const auto& in : workload_) workloadLimits_.push_back(stepBudget(problem_.referenceSteps(in)));
@@ -722,6 +762,32 @@ SuperoptResult Superoptimizer::run() {
         for (int i = 0; i < 200000; ++i) {
             const auto& seed = userWorkload_[static_cast<size_t>(r.uniformInt(0, static_cast<int>(userWorkload_.size()) - 1))];
             std::vector<int> in = mutateInput(seed, r, wlLo, wlHi, pc);
+            long steps = problem_.referenceSteps(in);
+            if (steps >= 0 && !agrees(p, in, stepBudget(steps), o)) return true;
+        }
+        return false;
+    };
+    // Log 204: the final check of a winner with several scalar arguments (no
+    // exhaustive proof): 1,000,000 inputs, each argument random, a derived
+    // constant of the reference and the candidate, one plus a small offset, or
+    // a small value.
+    auto scalarFuzzRefutes = [&](const Stmt& p) {
+        std::set<long long> cs;
+        collectConsts(problem_.referenceProgram(), cs);
+        collectConsts(p, cs);
+        std::vector<int> d = derivedConstants(cs), o;
+        Random r(config_.seed ^ 0xbb67ae8584caa73bULL);
+        std::vector<int> in(abi.params.size());
+        for (int i = 0; i < 1000000; ++i) {
+            for (auto& x : in) {
+                int pick = d[static_cast<size_t>(r.uniformInt(0, static_cast<int>(d.size()) - 1))];
+                switch (r.uniformInt(0, 3)) {
+                    case 0: x = static_cast<int>(r.engine()()); break;
+                    case 1: x = pick; break;
+                    case 2: x = static_cast<int>(static_cast<unsigned>(pick) + static_cast<unsigned>(r.uniformInt(-300, 300))); break;
+                    default: x = r.uniformInt(-1000, 1000); break;
+                }
+            }
             long steps = problem_.referenceSteps(in);
             if (steps >= 0 && !agrees(p, in, stepBudget(steps), o)) return true;
         }
@@ -840,6 +906,9 @@ SuperoptResult Superoptimizer::run() {
                 }
                 if (problem_.expected(in)) set.push_back(std::move(in));
             }
+            // Log 204: too few random inputs in the domain: resample the tests.
+            for (size_t i = 0; set.size() < cap && !tests_.empty(); ++i)
+                set.push_back(tests_[static_cast<size_t>(trng.uniformInt(0, static_cast<int>(tests_.size()) - 1))].input);
         };
         if (userWorkload_.empty()) {
             randomSet(0x2545f4914f6cdd1dULL, timing);
@@ -1128,6 +1197,13 @@ SuperoptResult Superoptimizer::run() {
                     if (fuzzRefutes(*timed[k].program)) {
                         ++result.fuzzRejected;
                         if (config_.verbose) std::cerr << "mutation fuzz refutes a timed winner\n";
+                        continue;
+                    }
+                    result.equivalence = "fuzzed";
+                } else if (abi.kind == CFunctionAbi::Kind::Scalars && abi.params.size() >= 2) {
+                    if (scalarFuzzRefutes(*timed[k].program)) {
+                        ++result.fuzzRejected;
+                        if (config_.verbose) std::cerr << "scalar fuzz refutes a timed winner\n";
                         continue;
                     }
                     result.equivalence = "fuzzed";

@@ -92,8 +92,9 @@ struct SuperoptResult {
     // How the returned program's equivalence was established (log 192):
     // "reference" (nothing changed), "exhaustive" (unary: all 2^32 arguments,
     // compiled), "fuzzed" (arrays with a user workload: also 200,000
-    // mutations of workload inputs, log 199c) or "tested" (tests + CEGIS +
-    // boundary inputs only).
+    // mutations of workload inputs, log 199c; scalar functions of >= 2
+    // arguments: 1,000,000 random / derived-constant inputs, log 204) or
+    // "tested" (tests + CEGIS + boundary inputs only).
     std::string equivalence = "reference";
     int exhaustiveRejected = 0;  // timed winners refuted by the exhaustive check
     int fuzzRejected = 0;        // timed array winners refuted by the mutation fuzz (log 199c)
