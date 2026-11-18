@@ -103,7 +103,7 @@ def tokenize(src):
             j = i + 1
             while j < n and src[j] != '"':
                 j += 2 if src[j] == "\\" else 1
-            toks.append(("str", src[i:j + 1], line, None))
+            toks.append(("str", src[i:j + 1], line, None, i))
             i = j + 1
             continue
         if c == "'":
@@ -123,31 +123,31 @@ def tokenize(src):
                 val = int(body[1:], 8)
             if val is not None and val > 127:
                 val -= 256  # plain char is signed here
-            toks.append(("char", src[i:j + 1], line, val))
+            toks.append(("char", src[i:j + 1], line, val, i))
             i = j + 1
             continue
         m = re.match(r"(0[xX][0-9a-fA-F]+|\d+)([uUlL]*)", src[i:]) if c.isdigit() else None
         if m and not re.match(r"[\d.]*[.eE]", src[i:i + len(m.group(0)) + 1][len(m.group(0)):] or "x"):
-            toks.append(("num", m.group(0), line, m))
+            toks.append(("num", m.group(0), line, m, i))
             i += len(m.group(0))
             continue
         if c.isdigit() or (c == "." and i + 1 < n and src[i + 1].isdigit()):
             m2 = re.match(r"[0-9a-fA-FxX.eEpP+\-uUlLfF]+", src[i:])
-            toks.append(("float", m2.group(0), line, None))
+            toks.append(("float", m2.group(0), line, None, i))
             i += len(m2.group(0))
             continue
         if c.isalpha() or c == "_":
             m = re.match(r"[A-Za-z_]\w*", src[i:])
-            toks.append(("id", m.group(0), line, None))
+            toks.append(("id", m.group(0), line, None, i))
             i += len(m.group(0))
             continue
         for p in PUNCT:
             if src.startswith(p, i):
-                toks.append(("p", p, line, None))
+                toks.append(("p", p, line, None, i))
                 i += len(p)
                 break
         else:
-            toks.append(("p", c, line, None))
+            toks.append(("p", c, line, None, i))
             i += 1
     return toks
 
@@ -162,10 +162,11 @@ def parse_type(words):
 # --------------------------------------------------------------- expressions
 
 class Node:
-    __slots__ = ("kind", "op", "kids", "text", "type", "pure", "value", "ops")
+    __slots__ = ("kind", "op", "kids", "text", "type", "pure", "value", "ops", "span")
 
     def __init__(self, kind, op=None, kids=(), text="", type_=None, pure=True, value=None):
         self.kind, self.op, self.kids, self.text = kind, op, list(kids), text
+        self.span = None  # [first, end) token indices in the parsed span (log 204b)
         self.type, self.pure, self.value = type_, pure, value
         self.ops = (1 if kind in ("bin", "un", "tern", "cast") else 0) + sum(k.ops for k in self.kids)
 
@@ -186,6 +187,16 @@ def arith(a, b):
 BIN = {"*": 13, "/": 13, "%": 13, "+": 12, "-": 12, "<<": 11, ">>": 11, "<": 10, ">": 10, "<=": 10, ">=": 10,
        "==": 9, "!=": 9, "&": 8, "^": 7, "|": 6, "&&": 5, "||": 4}
 ASSIGN = {"=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="}
+
+
+def spanned(f):
+    def g(self, *a):
+        start = self.i
+        n = f(self, *a)
+        if n.span is None:
+            n.span = (start, self.i)
+        return n
+    return g
 
 
 class Parser:
@@ -217,6 +228,7 @@ class Parser:
             return Node("opaque", kids=[e, r], pure=False)
         return e
 
+    @spanned
     def cond(self):
         c = self.binary(4)
         if self.peek()[1] == "?":
@@ -247,6 +259,7 @@ class Parser:
             else:
                 ty = arith(left.type, right.type)
             n = Node("bin", op, [left, right], type_=ty)
+            n.span = (left.span[0], self.i)
             n.pure = left.pure and right.pure and ty is not None
             left = n
 
@@ -254,6 +267,7 @@ class Parser:
         tok = self.peek(k)
         return tok[0] == "id" and (tok[1] in TYPE_WORDS or tok[1] in QUALIFIERS)
 
+    @spanned
     def unary(self):
         tok = self.peek()
         if tok[1] in ("-", "+", "~", "!") and tok[0] == "p":
@@ -289,7 +303,8 @@ class Parser:
                 self.i += j + 1
                 e = self.unary()
                 ty = parse_type(words)
-                n = Node("cast", "(" + " ".join(words) + ")", [e], type_=ty)
+                # the mapped spelling (log 204b: `(u32)` did not import)
+                n = Node("cast", "(" + (ty[0] if ty else " ".join(words)) + ")", [e], type_=ty)
                 n.pure = e.pure and ty is not None and e.type is not None
                 return n
             self.skip_parens()  # pointer cast etc.
@@ -310,6 +325,7 @@ class Parser:
                 if depth == 0:
                     return
 
+    @spanned
     def primary(self):
         tok = self.take()
         kind, text = tok[0], tok[1]
@@ -349,6 +365,15 @@ class Parser:
 
     def postfix(self, e):
         while True:
+            first = e.span[0] if e.span else self.i
+            e = self._postfix_once(e, first)
+            if e is None:
+                return self._last
+            e.span = e.span or (first, self.i)
+
+    def _postfix_once(self, e, first):
+        self._last = e
+        if True:
             tok = self.peek()
             if tok[1] == "[":
                 self.take()
@@ -378,7 +403,8 @@ class Parser:
                 self.take()
                 e = Node("opaque", kids=[e], pure=False)
             else:
-                return e
+                return None
+            return e
 
 
 def render(n, names=None):
@@ -440,11 +466,31 @@ def features(n, acc):
 
 # --------------------------------------------------------------- functions
 
+def blank_alternates(s):
+    """Blanks every #elif/#else branch (to its #endif), so that the braces of
+    `#if A  if(x){  #else  while(y){  #endif` count once (log 204b: SQLite's
+    amalgamation lost every function after line 49,349 without this)."""
+    out, stack = [], []  # stack: True while the current #if level is in an alternate branch
+    for line in s.split("\n"):
+        m = re.match(r"\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b", line)
+        word = m.group(1) if m else None
+        if word in ("if", "ifdef", "ifndef"):
+            stack.append(False)
+        elif word in ("elif", "else") and stack:
+            stack[-1] = True
+        elif word == "endif" and stack:
+            stack.pop()
+            out.append(line)
+            continue
+        out.append(re.sub(r"[^\n]", " ", line) if any(stack) and word is None else line)
+    return "\n".join(out)
+
+
 def functions(src):
     """(name, text, start offset) of every top-level function definition. Unlike
     c_census.functions, a `struct` in the parameter list does not exclude a
     function (log 204: the census skipped every function taking a struct)."""
-    s = c_census.strip(src)
+    s = blank_alternates(c_census.strip(src))
     s = re.sub(r"(?m)^[ \t]*#(?:[^\n]*\\\n)*[^\n]*", lambda m: re.sub(r"[^\n]", " ", m.group(0)), s)
     res, depth, start, i, m = [], 0, 0, 0, None
     while i < len(s):
@@ -624,7 +670,20 @@ def regions_of(name, text, min_ops, max_inputs):
             ins = inputs(r, {})
             if not 1 <= len(ins) <= max_inputs or any(t is None for t in ins.values()):
                 continue
-            found.append((r, ins, ctx, sub[0][2]))
+            # Log 204b: character offsets in the function text of the region and
+            # of each input's first occurrence (the text a splice passes).
+            def chars(node):
+                a, b = node.span
+                return sub[a][4], sub[b - 1][4] + len(sub[b - 1][1])
+            srcs = {}
+            def collect(node):
+                if node.kind in ("var", "load") and node.text not in srcs:
+                    a, b = chars(node)
+                    srcs[node.text] = text[a:b]
+                for k in node.kids:
+                    collect(k)
+            collect(r)
+            found.append((r, ins, ctx, sub[0][2], chars(r), srcs))
     return found
 
 
@@ -650,7 +709,9 @@ def main():
     ap.add_argument("--min-ops", type=int, default=3)
     ap.add_argument("--max-inputs", type=int, default=4)
     ap.add_argument("--algosearch", default="./algosearch")
+    ap.add_argument("--json", default=None, help="log 204b: also write every region's file offsets and inputs")
     args = ap.parse_args()
+    spans_out = []
     files = []
     for p in args.paths:
         if os.path.isdir(p):
@@ -676,7 +737,7 @@ def main():
                 regs = regions_of(name, text, args.min_ops, args.max_inputs)
                 if regs:
                     nwith += 1
-                for r, ins, ctx, line in regs:
+                for r, ins, ctx, line, (ca, cb), srcs in regs:
                     total += 1
                     origin = f"{f.split('scratchpad/')[-1]}:{base + line} in {name}"
                     code, body, rt = emit(r, ins, origin)
@@ -698,8 +759,19 @@ def main():
                             if args.keep:
                                 with open(os.path.join(args.keep, f"{args.tag}{key}.c"), "w") as g:
                                     g.write(code)
+                    if args.json is not None:
+                        assert src[start + ca:start + cb].strip()
+                        spans_out.append({"id": f"{args.tag}{key}", "file": f, "start": start + ca, "end": start + cb,
+                                          "line": base + line, "function": name, "context": ctx, "ops": r.ops,
+                                          "import": status, "rtype": rt[0], "body": body,
+                                          "inputs": [{"key": k2, "src": srcs[k2], "type": t2[0]} for k2, t2 in ins.items()],
+                                          "params": [p_.strip() for p_ in code.split("region(", 1)[1].split(")", 1)[0].split(",")]})
                     out.write(f"{f}\t{base + line}\t{name}\t{ctx}\t{r.ops}\t{len(ins)}\t{fs}\t{status}\t"
                               f"{int(unique)}\t{args.tag}{key}\t{render(r)}\n")
+    if args.json is not None:
+        import json
+        with open(args.json, "w") as g:
+            json.dump(spans_out, g, indent=1)
     print(f"{nfun} functions, {nwith} with a region; {total} regions, {len(seen)} unique, {imported} unique import",
           file=sys.stderr)
     print("features of unique imported regions:", dict(feat.most_common()), file=sys.stderr)

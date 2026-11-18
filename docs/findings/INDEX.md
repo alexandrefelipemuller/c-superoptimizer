@@ -373,3 +373,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 204. (results) 17/40 regions gain on uniform random inputs (16/30 branchy); wrong 2-input winner (pair boundaries + scalar fuzz added) and a hang (bounded domain sampling) fixed | 11_sections_121-125.md | 3164 |
 | 204c. (registered) The 10 two-input regions rerun with the fixed checks | 11_sections_121-125.md | 3206 |
 | 204c. (results) All 30 winners correct (12 fuzzed, 0 mismatches in 10^8 external pairs); corrected musl_7111 gains branch-free 1.21-1.25x; 18 valid gains of 40 | 11_sections_121-125.md | 3226 |
+| 204b. (registered) Regions spliced back into SQLite: 25 hot regions (gcov), inputs recorded by instrumentation, speedtest1 base/wrap/opt; splitter #else fix (census 1,448 unique regions) | 11_sections_121-125.md | 3243 |
