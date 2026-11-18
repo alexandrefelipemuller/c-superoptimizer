@@ -19,7 +19,7 @@ Interface gaps (planned 2026-11-13), and their status:
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
 | 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs. Reach moves + structural timing (203, default): memsys3Roundup gap closed, 12 vs 9 gains on 36 samples |
 | 4 | larger functions and real code, in small steps. 4a: constant `#define`, `INT_MAX`/`INT_MIN`, inlined `return expr;` helpers, `continue` in any loop, target picked automatically | 4a done (log 191): 8 real-style samples import exactly; 1 gain of 6 measurable; no gain returns the original text |
-| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200); in-loop byte context, opt-in (201); cross-context confirmation, opt-in (202) |
+| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200); in-loop byte context, opt-in (201); cross-context confirmation, opt-in (202); scalar regions inside functions: 1,048 importable in 8 code bases, 18/40 gain on random inputs (204) |
 | 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | started (log 192): boundary inputs in CEGIS; unary total functions checked on all 2^32 arguments compiled; array functions: whole workload + workload mutations in CEGIS, 200,000-mutation final check, level `fuzzed` (199/199c) |
 | 6 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -330,6 +330,7 @@ Inputs the reference fails on are outside the domain everywhere, including
     ./algosearch superopt FILE.c --time-top 4 --workload W.txt     # search timed on your inputs (log 195)
     scripts/run_ceiling_battery.sh OUT TAG          # hand versions vs search winners (log 198; RUNS=DIR for other winners, 198b; DIR=, LIST= for another sample set, 200)
     scripts/c_byte_caller.py W.txt ORIG.c X.c ...    # char functions timed in a loop over a byte buffer (log 200; aligned, 201)
+    scripts/c_regions.py --out R.tsv --keep DIR SRC  # pure scalar expressions inside real functions, as region() files (log 204)
     scripts/make_int_workloads.py OUTDIR [--large N] # nibble / allocation-size workloads (log 200)
     # a speedup ratio is comparable only within one session (198b): re-measure the baseline arm alongside
 
