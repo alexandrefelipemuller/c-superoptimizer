@@ -376,3 +376,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 204b. (registered) Regions spliced back into SQLite: 25 hot regions (gcov), inputs recorded by instrumentation, speedtest1 base/wrap/opt; splitter #else fix (census 1,448 unique regions) | 11_sections_121-125.md | 3243 |
 | 204b. (results) No end-to-end gain in SQLite (opt/wrap 1.001; hot regions < 1% of time); spliced winner corrupted the DB: emitter relied on -fwrapv, now emits + - * via unsigned | 11_sections_121-125.md | 3291 |
 | 205. (registered) Benchmark chosen by extractable share (c_regions_share.py: libpng pngtest 9.5%, lz4 5.4%, zlib 3.3%, Lua 1.0%, Mbed TLS 0%); 6 hot libpng/zlib regions, base/wrap/opt | 11_sections_121-125.md | 3346 |
+| 205. (results) libpng splice: opt/wrap 0.993, no end-to-end gain; slide_hash 16x isolated was cmov in the program (isolated harness branched); time regions in their program | 11_sections_121-125.md | 3394 |
