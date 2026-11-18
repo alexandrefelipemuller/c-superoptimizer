@@ -369,3 +369,4 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 202. (results) Cross-context confirm loses is_cr_or_lf, removes no regression; in-loop byte timer wrong both ways; stays opt-in; returned-original bug fixed | 11_sections_121-125.md | 2984 |
 | 203. (registered) `--reach-moves`: branch merge + divisibility split + structural timing; memsys3Roundup/is_leap gaps; setup_salt out of scope (serial chain, needs bit-reversal idiom) | 11_sections_121-125.md | 3024 |
 | 203. (results) memsys3Roundup closed (3.96x, 3/3 seeds), 12 vs 9 gains, no regression; swapc gain is inlining context; is_leap not reached; `--reach-moves` default | 11_sections_121-125.md | 3060 |
+| 204. (registered) Scalar regions: census of 8 code bases (1,048 unique importable regions in 14,263 functions); 200 census denominator corrected (struct headers skipped); pilot on 40 regions | 11_sections_121-125.md | 3111 |
