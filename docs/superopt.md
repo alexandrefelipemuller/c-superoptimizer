@@ -19,7 +19,7 @@ Interface gaps (planned 2026-11-13), and their status:
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
 | 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs. Reach moves + structural timing (203, default): memsys3Roundup gap closed, 12 vs 9 gains on 36 samples |
 | 4 | larger functions and real code, in small steps. 4a: constant `#define`, `INT_MAX`/`INT_MIN`, inlined `return expr;` helpers, `continue` in any loop, target picked automatically | 4a done (log 191): 8 real-style samples import exactly; 1 gain of 6 measurable; no gain returns the original text |
-| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200); in-loop byte context, opt-in (201); cross-context confirmation, opt-in (202); scalar regions inside functions: 1,448 importable in 8 code bases, 18/40 gain on random inputs (204); spliced back into SQLite: no end-to-end gain, hot regions < 1% of its time (204b); libpng (most scalar-heavy of 6 programs, 9.5%): no end-to-end gain, isolated gains are harness codegen (205); candidates timed inside their program (`--program-timer`): false gains gone, planted gain found, but per-region winners do not compose (206) |
+| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200); in-loop byte context, opt-in (201); cross-context confirmation, opt-in (202); scalar regions inside functions: 1,448 importable in 8 code bases, 18/40 gain on random inputs (204); spliced back into SQLite: no end-to-end gain, hot regions < 1% of its time (204b); libpng (most scalar-heavy of 6 programs, 9.5%): no end-to-end gain, isolated gains are harness codegen (205); candidates timed inside their program (`--program-timer`): false gains gone, planted gain found, but per-region winners do not compose (206); greedy composition, each set timed in its program: blocks that regression, keeps a planted gain (−10.4% end to end) (207) |
 | 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | started (log 192): boundary inputs in CEGIS; unary total functions checked on all 2^32 arguments compiled; array functions: whole workload + workload mutations in CEGIS, 200,000-mutation final check, level `fuzzed` (199/199c) |
 | 6 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -294,6 +294,7 @@ before one is accepted. Without `--workload` the second half is a second
 random set.
 
 ### Timing inside the program (log 206)
+    scripts/compose_regions.py SPEC.json CANDS.txt OUT  # greedy composition of region winners, timed in the program (log 207)
 
 `--program-timer CMD` replaces the in-loop harness: each timing runs
 `CMD CANDIDATE.c TRIALS`, which prints `REF CAND SPEEDUP`.
@@ -307,6 +308,14 @@ place), but a region is still timed with its neighbours as they are. Several
 winners spliced into one function can change gcc's whole-function decisions.
 Three Paeth winners of 1.05x each made the function 0.57x together, because
 gcc stopped if-converting it. A set of winners has to be timed as one.
+
+`scripts/compose_regions.py SPEC CANDS OUT` does that (log 207). Starting from
+the program with every region wrapped in its original, it tries candidates in
+order. A candidate is accepted only if the program with it and every winner
+accepted so far beats the current program. The test counts cycles in the timed
+functions of that region's file: median ≥ 1.02 and faster in ≥ 9 of 11 pairs.
+On libpng it accepts nothing, and the 206 regression is not taken. With a
+planted mispredicting branch it keeps that gain: pngtest −10.4%, 15/15.
 
 ### Equivalence levels (log 192)
 
