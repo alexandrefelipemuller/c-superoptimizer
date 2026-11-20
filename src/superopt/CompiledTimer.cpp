@@ -106,9 +106,9 @@ std::string callFor(const CFunctionAbi& abi, const std::string& fn, const std::s
 }  // namespace
 
 CompiledTimer::CompiledTimer(std::string originalSource, CFunctionAbi abi, std::vector<std::vector<int>> workload,
-                             std::string workDir, std::string byteType)
+                             std::string workDir, std::string byteType, std::string programTimer)
     : originalSource_(std::move(originalSource)), abi_(std::move(abi)), workDir_(std::move(workDir)),
-      byteType_(std::move(byteType)) {
+      byteType_(std::move(byteType)), programTimer_(std::move(programTimer)) {
     if (!byteType_.empty() && (abi_.kind != CFunctionAbi::Kind::Scalars || abi_.params.size() != 1))
         throw CImportError("byte timing context needs a unary scalar function");
     if (std::system(("mkdir -p '" + workDir_ + "'").c_str()) != 0)
@@ -123,6 +123,30 @@ CompiledTimer::CompiledTimer(std::string originalSource, CFunctionAbi abi, std::
 
 CompiledTimer::Timing CompiledTimer::time(const std::string& candidateSource, int trials) const {
     Timing t;
+    if (!programTimer_.empty()) {
+        std::string path = workDir_ + "/p" + std::to_string(compilations_++) + ".c";
+        {
+            std::ofstream(path) << candidateSource;
+        }
+        std::string cmd = programTimer_ + " '" + path + "' " + std::to_string(trials) + " 2> '" + path + ".err'";
+        FILE* p = popen(cmd.c_str(), "r");
+        if (!p) {
+            t.error = "cannot run the program timer";
+            return t;
+        }
+        if (std::fscanf(p, "%lf %lf %lf", &t.referenceNs, &t.candidateNs, &t.speedup) == 3) t.ok = true;
+        int rc = pclose(p);
+        if (rc != 0 || !t.ok) {
+            std::ifstream err(path + ".err");
+            std::stringstream ss;
+            ss << err.rdbuf();
+            t.ok = false;
+            t.error = "program timer failed: " + ss.str().substr(0, 300);
+        }
+        std::remove(path.c_str());
+        std::remove((path + ".err").c_str());
+        return t;
+    }
     std::string src = harnessTemplate;
     src = replaceAll(src, "%REF%", prefixFunctions(originalSource_, "ref_", abi_.name));
     src = replaceAll(src, "%CAND%", prefixFunctions(candidateSource, "cand_", abi_.name));

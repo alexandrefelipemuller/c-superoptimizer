@@ -928,9 +928,10 @@ SuperoptResult Superoptimizer::run() {
             if (config_.timingContext == "byte") byteType = byteEligible;
         }
         result.timingContext = byteType.empty() ? "int" : byteType == "unsigned char" ? "uchar" : "schar";
-        timer = std::make_unique<CompiledTimer>(config_.originalSource, abi, timing, config_.workDir, byteType);
+        timer = std::make_unique<CompiledTimer>(config_.originalSource, abi, timing, config_.workDir, byteType,
+                                                config_.programTimer);
         confirmTimer = std::make_unique<CompiledTimer>(config_.originalSource, abi, confirm, config_.workDir + "/confirm",
-                                                       byteType);
+                                                       byteType, config_.programTimer);
         if (config_.crossContextConfirm && !byteEligible.empty())
             altConfirmTimer = std::make_unique<CompiledTimer>(config_.originalSource, abi, confirm,
                                                               config_.workDir + "/confirm_alt",

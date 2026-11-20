@@ -22,7 +22,7 @@ public:
     // `char *` does. gcc can compile the same function differently in the two
     // contexts (log 200: 1.41x against 1.00x).
     CompiledTimer(std::string originalSource, CFunctionAbi abi, std::vector<std::vector<int>> workload,
-                  std::string workDir, std::string byteType = "");
+                  std::string workDir, std::string byteType = "", std::string programTimer = "");
 
     struct Timing {
         bool ok = false;           // compiled and ran
@@ -57,6 +57,10 @@ private:
     std::string workDir_;
     std::string inputsPath_;
     std::string byteType_;
+    // Log 206: an external command `CMD CANDIDATE.c TRIALS` that times the
+    // candidate inside its program and prints `REF CAND SPEEDUP`; when set,
+    // time() runs it instead of the in-loop harness.
+    std::string programTimer_;
     mutable int compilations_ = 0;
 };
 

@@ -64,6 +64,10 @@ struct SuperoptConfig {
     // the beam's equivalents and never be timed). Default since log 203
     // (`--no-reach-moves` restores 202's search).
     bool reachMoves = true;
+    // Log 206: time candidates inside their program with this command
+    // (scripts/program_timer.py SPEC): `CMD CANDIDATE.c TRIALS` prints
+    // `REF CAND SPEEDUP`. Empty: the in-loop harness.
+    std::string programTimer;
 };
 
 struct SuperoptResult {
