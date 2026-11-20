@@ -19,7 +19,7 @@ Interface gaps (planned 2026-11-13), and their status:
 | 3b | compiled timing of candidates inside the loop (`--time-top K`) | done (log 189) |
 | 3c | reach: algorithmic moves (default; `--no-algorithmic-moves`), a second, larger sample set | done (log 190, 190b): moves are the default; gains on 7 of 23 samples vs 4 without; timer on 512 fresh inputs. Reach moves + structural timing (203, default): memsys3Roundup gap closed, 12 vs 9 gains on 36 samples |
 | 4 | larger functions and real code, in small steps. 4a: constant `#define`, `INT_MAX`/`INT_MIN`, inlined `return expr;` helpers, `continue` in any loop, target picked automatically | 4a done (log 191): 8 real-style samples import exactly; 1 gain of 6 measurable; no gain returns the original text |
-| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200); in-loop byte context, opt-in (201); cross-context confirmation, opt-in (202); scalar regions inside functions: 1,448 importable in 8 code bases, 18/40 gain on random inputs (204); spliced back into SQLite: no end-to-end gain, hot regions < 1% of its time (204b); libpng (most scalar-heavy of 6 programs, 9.5%): no end-to-end gain, isolated gains are harness codegen (205) |
+| 4b | real code: census of musl/Lua functions that import; superopt on them | done (log 192/192b): under 1% import; is_leap 2.7-4.0x proved. Char literals (193), `unsigned` (194), `char`/`short` (197); ceiling study + 65,536-input timer (198/198b); string pilot (199); 6 more code bases, 0.19% import, byte-buffer timing context (200); in-loop byte context, opt-in (201); cross-context confirmation, opt-in (202); scalar regions inside functions: 1,448 importable in 8 code bases, 18/40 gain on random inputs (204); spliced back into SQLite: no end-to-end gain, hot regions < 1% of its time (204b); libpng (most scalar-heavy of 6 programs, 9.5%): no end-to-end gain, isolated gains are harness codegen (205); candidates timed inside their program (`--program-timer`): false gains gone, planted gain found, but per-region winners do not compose (206) |
 | 5 | equivalence beyond tests (compiled differential testing at scale; later SMT/BMC) | started (log 192): boundary inputs in CEGIS; unary total functions checked on all 2^32 arguments compiled; array functions: whole workload + workload mutations in CEGIS, 200,000-mutation final check, level `fuzzed` (199/199c) |
 | 6 | `algosearch superopt FILE --func f`: optimized C + measured speedup + level of the equivalence guarantee | |
 
@@ -293,6 +293,21 @@ times on one half, and the final top three are re-measured on the other half
 before one is accepted. Without `--workload` the second half is a second
 random set.
 
+### Timing inside the program (log 206)
+
+`--program-timer CMD` replaces the in-loop harness: each timing runs
+`CMD CANDIDATE.c TRIALS`, which prints `REF CAND SPEEDUP`.
+`scripts/program_timer.py SPEC.json` is such a command for a region. It splices
+the candidate at the region's sites in its preprocessed file and wraps the
+enclosing functions with an rdtsc counter. It then rebuilds that file, runs the
+program on its recorded run, and compares the cycles against the original.
+
+This removes harness artifacts (205's 16x slide_hash winner measures 0.68x in
+place), but a region is still timed with its neighbours as they are. Several
+winners spliced into one function can change gcc's whole-function decisions.
+Three Paeth winners of 1.05x each made the function 0.57x together, because
+gcc stopped if-converting it. A set of winners has to be timed as one.
+
 ### Equivalence levels (log 192)
 
 `superopt` prints `equivalence_level`:
@@ -333,6 +348,7 @@ Inputs the reference fails on are outside the domain everywhere, including
     scripts/c_regions.py --out R.tsv --keep DIR SRC  # pure scalar expressions inside real functions, as region() files (log 204; --json offsets, 204b)
     scripts/c_regions_splice.py instrument|splice ... # record a region's inputs in its program / splice replacements in (log 204b)
     scripts/c_regions_share.py --pp PP --cov COV      # share of line executions on extractable regions (gcov; log 205)
+    ./algosearch superopt R.c --program-timer CMD     # time candidates in their program; CMD = scripts/program_timer.py SPEC.json (log 206)
     scripts/make_int_workloads.py OUTDIR [--large N] # nibble / allocation-size workloads (log 200)
     # a speedup ratio is comparable only within one session (198b): re-measure the baseline arm alongside
 
