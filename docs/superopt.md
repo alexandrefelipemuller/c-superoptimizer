@@ -294,7 +294,6 @@ before one is accepted. Without `--workload` the second half is a second
 random set.
 
 ### Timing inside the program (log 206)
-    scripts/compose_regions.py SPEC.json CANDS.txt OUT  # greedy composition of region winners, timed in the program (log 207)
 
 `--program-timer CMD` replaces the in-loop harness: each timing runs
 `CMD CANDIDATE.c TRIALS`, which prints `REF CAND SPEEDUP`.
@@ -358,6 +357,7 @@ Inputs the reference fails on are outside the domain everywhere, including
     scripts/c_regions_splice.py instrument|splice ... # record a region's inputs in its program / splice replacements in (log 204b)
     scripts/c_regions_share.py --pp PP --cov COV      # share of line executions on extractable regions (gcov; log 205)
     ./algosearch superopt R.c --program-timer CMD     # time candidates in their program; CMD = scripts/program_timer.py SPEC.json (log 206)
+    scripts/compose_regions.py SPEC.json CANDS.txt OUT  # greedy composition of region winners, timed in the program (log 207)
     scripts/make_int_workloads.py OUTDIR [--large N] # nibble / allocation-size workloads (log 200)
     # a speedup ratio is comparable only within one session (198b): re-measure the baseline arm alongside
 
