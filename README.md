@@ -73,7 +73,7 @@ seed pair got better and 3 got worse out of 63.
 You need Linux on x86-64, gcc, make, and Python 3. Timing uses `rdtsc`.
 
 ```sh
-make                 # builds ./algosearch
+make                 # builds ./algosearch and the ./c-superoptimizer command
 make test            # builds and runs the unit tests
 ```
 
@@ -81,13 +81,15 @@ make test            # builds and runs the unit tests
 
 ```sh
 # Superoptimize a function (the target is picked automatically, or use --func NAME)
-./algosearch superopt file.c --seconds 60 --time-top 4 --idiom-moves --out file.opt.c
+./c-superoptimizer file.c --seconds 60 --time-top 4 --idiom-moves --out file.opt.c
 
 # Only check whether a function is in the supported subset, and print its Mini-C
-./algosearch c-import file.c --func NAME
+./c-superoptimizer import file.c --func NAME
 ```
 
-Useful `superopt` flags:
+`./algosearch superopt` and `./algosearch c-import` are the same commands.
+
+Useful flags:
 
 | flag | meaning |
 |---|---|

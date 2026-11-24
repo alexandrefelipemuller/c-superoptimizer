@@ -1346,7 +1346,24 @@ void emitReferenceSolution(const ReferenceProblem& ref, const std::vector<Soluti
     }
 }
 
+// `c-superoptimizer` (a symlink to this binary, made by `make`) is the
+// superoptimizer's own command: `c-superoptimizer FILE.c [flags]` runs
+// `superopt`, and `c-superoptimizer import FILE.c [flags]` runs `c-import`.
+static int runAsCSuperoptimizer(int argc, char** argv) {
+    if (argc < 2 || std::strcmp(argv[1], "--help") == 0 || std::strcmp(argv[1], "-h") == 0) {
+        std::cout << "usage: c-superoptimizer FILE.c [--func NAME] [--seconds S] [--seed N] [--time-top K]\n"
+                     "                        [--idiom-moves] [--workload FILE] [--program-timer CMD] [--out FILE]\n"
+                     "       c-superoptimizer import FILE.c [--func NAME] [--emit]\n"
+                     "See README.md and docs/superopt.md.\n";
+        return argc < 2 ? 1 : 0;
+    }
+    if (std::strcmp(argv[1], "import") == 0) return runCImportTool(argc - 1, argv + 1);
+    return runSuperoptTool(argc, argv);
+}
+
 int main(int argc, char** argv) {
+    const char* slash = std::strrchr(argv[0], '/');
+    if (std::strcmp(slash ? slash + 1 : argv[0], "c-superoptimizer") == 0) return runAsCSuperoptimizer(argc, argv);
     if (argc > 1 && std::strcmp(argv[1], "c-import") == 0) return runCImportTool(argc - 1, argv + 1);
     if (argc > 1 && std::strcmp(argv[1], "superopt") == 0) return runSuperoptTool(argc - 1, argv + 1);
     CliArgs args;

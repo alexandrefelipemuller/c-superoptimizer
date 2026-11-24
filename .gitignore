@@ -2,6 +2,7 @@
 build/
 algosearch
 algosearch_tests
+c-superoptimizer
 solutions.json
 *.o
 *.d

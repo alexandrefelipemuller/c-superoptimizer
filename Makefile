@@ -16,7 +16,11 @@ MAIN_OBJECT := $(BUILD_DIR)/lib/main.o
 
 .PHONY: all test clean
 
-all: algosearch
+all: algosearch c-superoptimizer
+
+# The superoptimizer's own command name (see runAsCSuperoptimizer in main.cpp).
+c-superoptimizer: algosearch
+	ln -sf algosearch $@
 
 algosearch: $(LIB_OBJECTS) $(MAIN_OBJECT)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -s
@@ -36,6 +40,6 @@ $(BUILD_DIR)/tests/%.o: $(TEST_DIR)/%.cpp
 	$(CXX) $(CXXFLAGS) -I$(TEST_DIR) -c $< -o $@
 
 clean:
-	rm -rf $(BUILD_DIR) algosearch algosearch_tests
+	rm -rf $(BUILD_DIR) algosearch algosearch_tests c-superoptimizer
 
 -include $(LIB_OBJECTS:.o=.d) $(TEST_OBJECTS:.o=.d) $(MAIN_OBJECT:.o=.d)
