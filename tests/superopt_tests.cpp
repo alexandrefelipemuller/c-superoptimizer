@@ -1,6 +1,12 @@
+#include <algorithm>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "core/Random.hpp"
 #include "interpreter/CostModel.hpp"
 #include "interpreter/Interpreter.hpp"
 #include "language/Parser.hpp"
@@ -301,4 +307,94 @@ TEST(superopt_divisibility_split_move_is_exact) {
     }
     Program odd = parseProgram("v1 = arr[0];\narr[0] = ((v1 % 9) == 0);\n");
     CHECK(applyAlgorithmicMove(*odd, 6, 2, 1, 1) == nullptr);
+}
+
+namespace {
+
+std::string readText(const std::string& path) {
+    std::ifstream f(path);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+// Which idiom moves (7-10) rewrite the planted sample at `path` into an
+// equivalent program; -1 in the result marks a rewrite that changed behaviour.
+std::vector<int> idiomMovesThatApply(const std::string& path) {
+    CImport imp = importCFunction(readText(path));
+    int vars = imp.abi.numVars + 2;
+    int arity = static_cast<int>(imp.abi.params.size());
+    std::vector<std::vector<int>> inputs;
+    Random r(7);
+    const int special[] = {0, 1, 2, 3, 7, 10, 15, 16, 17, 255, 256, 4095, 4096, 65535, 1 << 29, (1 << 30) + 1,
+                           2147483647, -1, -2, -7, -2147483647 - 1};
+    for (int k = 0; k < 600; ++k) {
+        std::vector<int> in;
+        for (int a = 0; a < arity; ++a)
+            in.push_back(k < 21 * 21 ? special[(a == 0 ? k : k / 21) % 21] : static_cast<int>(r.engine()()));
+        inputs.push_back(in);
+    }
+    std::vector<int> out;
+    for (int move = 7; move <= 10; ++move) {
+        Program m = applyAlgorithmicMove(*imp.program, move, vars, arity, 1);
+        if (!m) continue;
+        out.push_back(sameBehaviour(*imp.program, *m, inputs, vars) ? move : -1);
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST(superopt_idiom_moves_rewrite_the_planted_dev_shapes_exactly) {
+    const std::string d = "tests/c_samples_planted/";
+    CHECK(idiomMovesThatApply(d + "p_popcount_shift.c") == std::vector<int>{9});
+    CHECK(idiomMovesThatApply(d + "p_parity_shift.c") == std::vector<int>{9});
+    CHECK(idiomMovesThatApply(d + "p_reverse32.c") == std::vector<int>{9});
+    CHECK(idiomMovesThatApply(d + "p_div_sub.c") == std::vector<int>{7});
+    CHECK(idiomMovesThatApply(d + "p_mod_sub.c") == std::vector<int>{7});
+    CHECK(idiomMovesThatApply(d + "p_sum_range.c") == std::vector<int>{8});
+    CHECK(idiomMovesThatApply(d + "p_next_pow2.c") == std::vector<int>{10});
+}
+
+TEST(superopt_idiom_moves_never_change_behaviour_on_held_out_samples) {
+    for (const char* s : {"h_popcount_xshift", "h_popcount16", "h_parity8", "h_reverse16", "h_div10_sub",
+                          "h_sum_below", "h_prev_pow2", "h_ilog2", "h_sum_squares"}) {
+        std::vector<int> moves = idiomMovesThatApply(std::string("tests/c_samples_planted_heldout/") + s + ".c");
+        for (int m : moves) CHECK(m != -1);
+        if (std::getenv("IDIOM_REPORT")) {
+            std::cerr << s << ":";
+            for (int m : moves) std::cerr << " " << m;
+            std::cerr << "\n";
+        }
+    }
+}
+
+TEST(superopt_nested_move_makes_quadratic_array_loops_linear) {
+    for (const char* s : {"d_array_max", "d_array_is_sorted"}) {
+        CImport imp = importCFunction(readText(std::string("tests/c_samples_deopt/") + s + ".c"));
+        int vars = imp.abi.numVars + 2;
+        Program m = applyAlgorithmicMove(*imp.program, 11, vars, 0, 1);
+        CHECK(m != nullptr);
+        if (!m) continue;
+        if (std::getenv("IDIOM_REPORT")) std::cerr << s << ":\n" << printStmt(*m);
+        // no while nested in a while any more
+        std::string t = printStmt(*m);
+        size_t first = t.find("while"), depth = 0;
+        for (size_t i = first; i < t.size(); ++i) {
+            if (t[i] == '{') ++depth;
+            if (t[i] == '}' && depth > 0 && --depth == 0) {
+                CHECK(t.substr(first + 5, i - first).find("while") == std::string::npos);
+                break;
+            }
+        }
+        Random r(3);
+        std::vector<std::vector<int>> inputs = {{}, {5}, {1, 1}, {2, 1}, {1, 2, 2, 3}, {3, 3, 3}, {-1, -5, 7}};
+        for (int k = 0; k < 400; ++k) {
+            std::vector<int> in(static_cast<size_t>(r.uniformInt(0, 12)));
+            for (auto& v : in) v = r.uniformInt(-4, 4);
+            if (k % 3 == 0) std::sort(in.begin(), in.end());
+            inputs.push_back(in);
+        }
+        CHECK(sameBehaviour(*imp.program, *m, inputs, vars));
+    }
 }

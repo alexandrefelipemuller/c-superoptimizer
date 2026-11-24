@@ -21,6 +21,8 @@ namespace {
 // A result or parameter narrower than 32 bits (log 197): scripts that call
 // the function from another unit as `int f(int, ...)` need a typed wrapper.
 bool narrowSignature(const CFunctionAbi& abi) {
+    // log 208d: the struct adapter already calls with C's conversions
+    if (needsAdapter(abi)) return false;
     auto narrow = [](const std::string& t) { return t != "int" && t != "unsigned"; };
     if (abi.returnsValue && narrow(abi.returnType)) return true;
     for (const auto& t : abi.paramTypes)
@@ -47,7 +49,7 @@ const char* kindName(CFunctionAbi::Kind k) { return k == CFunctionAbi::Kind::Arr
 }  // namespace
 
 int runCImportTool(int argc, char** argv) {
-    std::string file, func, evalPath, programPath;
+    std::string file, func, evalPath, programPath, adapterName, adapterTarget;
     bool emit = false;
     long stepLimit = 10'000'000;
     for (int i = 1; i < argc; ++i) {
@@ -64,6 +66,10 @@ int runCImportTool(int argc, char** argv) {
         else if (a == "--eval") evalPath = next();
         else if (a == "--program") programPath = next();
         else if (a == "--step-limit") stepLimit = std::stol(next());
+        else if (a == "--adapter") {  // log 208d: print the harness adapter NAME -> TARGET
+            adapterName = next();
+            adapterTarget = next();
+        }
         else if (file.empty() && !a.empty() && a[0] != '-') file = a;
         else {
             std::cerr << "Unknown argument: " << a << "\n";
@@ -72,7 +78,7 @@ int runCImportTool(int argc, char** argv) {
         }
     }
     if (file.empty()) {
-        std::cerr << "usage: algosearch c-import FILE.c [--func NAME] [--program MINIC] [--emit] [--eval INPUTS] [--step-limit N]\n";
+        std::cerr << "usage: algosearch c-import FILE.c [--func NAME] [--program MINIC] [--emit] [--eval INPUTS] [--step-limit N] [--adapter NAME TARGET]\n";
         return 1;
     }
     std::string source;
@@ -82,6 +88,10 @@ int runCImportTool(int argc, char** argv) {
     }
     try {
         CImport imp = importCFunction(source, func);
+        if (!adapterName.empty()) {
+            std::cout << abiAdapter(imp.abi, adapterName, adapterTarget);
+            return 0;
+        }
         if (!programPath.empty()) {
             // Another Mini-C program (e.g. a search result) under FILE's ABI.
             std::string text;
@@ -133,7 +143,7 @@ int runCImportTool(int argc, char** argv) {
         std::cout << "// " << imp.abi.name << ": abi=" << kindName(imp.abi.kind)
                   << " returns=" << (imp.abi.returnsValue ? "int" : "void")
                   << " params=" << imp.abi.params.size() << " vars=" << imp.abi.numVars
-                  << " size=" << imp.program->size() << (narrowSignature(imp.abi) ? " narrow=1" : "") << "\n";
+                  << " size=" << imp.program->size() << (narrowSignature(imp.abi) ? " narrow=1" : "") << (needsAdapter(imp.abi) ? " adapter=1" : "") << "\n";
         std::cout << printStmt(*imp.program);
         return 0;
     } catch (const CImportError& e) {
@@ -172,6 +182,8 @@ int runSuperoptTool(int argc, char** argv) {
         else if (a == "--cross-context-confirm") cfg.crossContextConfirm = true;
         else if (a == "--reach-moves") cfg.reachMoves = true;
         else if (a == "--no-reach-moves") cfg.reachMoves = false;
+        else if (a == "--idiom-moves") cfg.idiomMoves = true;
+        else if (a == "--no-idiom-moves") cfg.idiomMoves = false;
         else if (a == "--program-timer") cfg.programTimer = next();
         else if (a == "--timing-context") {
             cfg.timingContext = next();
@@ -189,7 +201,7 @@ int runSuperoptTool(int argc, char** argv) {
     }
     if (file.empty()) {
         std::cerr << "usage: algosearch superopt FILE.c [--func NAME] [--seconds 30] [--beam 40] [--mutants 12] "
-                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves] [--workload INPUTS] [--timing-context int|byte] [--cross-context-confirm] [--no-reach-moves] [--program-timer CMD]\n";
+                     "[--seed 1] [--max-n 10] [--num-vars N] [--out FOUND.c] [--verbose] [--time-top K] [--work-dir DIR] [--no-algorithmic-moves] [--workload INPUTS] [--timing-context int|byte] [--cross-context-confirm] [--no-reach-moves] [--idiom-moves] [--program-timer CMD]\n";
         return 1;
     }
     try {
@@ -241,7 +253,7 @@ int runSuperoptTool(int argc, char** argv) {
             std::cout << "timings " << r.timings << "\ntiming_seconds " << r.timingSeconds << "\ntiming_context " << r.timingContext << "\ncross_context_self_control " << r.crossContextSelfControl << "\ncross_context_speedup " << r.crossContextSpeedup << "\ncross_context_rejected " << r.crossContextRejected << "\nself_control "
                       << r.selfControl << "\nconfirm_self_control " << r.confirmSelfControl << "\nnoise_threshold " << r.noiseThreshold << "\nemitted_reference "
                       << r.emittedReference << "\nmeasured_speedup " << r.measuredSpeedup << "\nequivalence_level " << r.equivalence
-                      << "\nexhaustive_rejected " << r.exhaustiveRejected << "\nfuzz_rejected " << r.fuzzRejected << "\nmodel_best_cost "
+                      << "\nexhaustive_rejected " << r.exhaustiveRejected << "\nfuzz_rejected " << r.fuzzRejected << "\nidiom_correct " << r.idiomCorrect << "\nmodel_best_cost "
                       << r.modelBestCost << "\n";
         }
         std::cout << "trajectory";

@@ -101,6 +101,137 @@ bool splittableModTest(const Expr& e) {
     return c > 1;
 }
 
+
+// ------------------------------------------------------------- idiom rewrites (log 208)
+// Classical rewrites of whole loop shapes, applied wherever the shape occurs
+// (opt-in, `--idiom-moves`): subtractive division, counted arithmetic sum,
+// bit-serial loops (popcount, parity, bit reversal) and power-of-two doubling.
+
+ExprPtr V(int v) { return makeVar(v); }
+ExprPtr K(int c) { return makeIntConst(c); }
+ExprPtr B(ExprKind k, ExprPtr a, ExprPtr b) { return makeBinOp(k, std::move(a), std::move(b)); }
+
+bool isVarE(const Expr* e, int v) { return e && e->kind == ExprKind::Var && e->varIndex == v; }
+bool isConstE(const Expr* e, int c) { return e && e->kind == ExprKind::IntConst && e->intValue == c; }
+
+// `v = v + 1` or `v = 1 + v`.
+bool isIncrement(const Stmt& st, int v) {
+    if (st.kind != StmtKind::Assign || st.varIndex != v || st.valueExpr->kind != ExprKind::Add) return false;
+    const Expr& e = *st.valueExpr;
+    return (isVarE(e.lhs.get(), v) && isConstE(e.rhs.get(), 1)) || (isVarE(e.rhs.get(), v) && isConstE(e.lhs.get(), 1));
+}
+
+// `v = v OP w` (or `w OP v` for a commutative OP); returns w or null.
+const Expr* accumulateOperand(const Stmt& st, int v, ExprKind op) {
+    if (st.kind != StmtKind::Assign || st.varIndex != v || st.valueExpr->kind != op) return nullptr;
+    const Expr& e = *st.valueExpr;
+    if (isVarE(e.lhs.get(), v)) return e.rhs.get();
+    if (op != ExprKind::Sub && isVarE(e.rhs.get(), v)) return e.lhs.get();
+    return nullptr;
+}
+
+void varsOf(const Stmt& s, std::set<int>& out) {
+    if (s.kind == StmtKind::Assign) out.insert(s.varIndex);
+    for (const Expr* e : {s.valueExpr.get(), s.indexExpr.get(), s.indexExpr2.get(), s.cond.get()}) collectVars(e, out);
+    for (const auto& b : s.body) varsOf(*b, out);
+    for (const auto& b : s.elseBody) varsOf(*b, out);
+}
+
+// Whether the last write of `v` before position `i` of `list` is `v = value`,
+// with only plain scalar assignments in between.
+bool initialisedTo(const std::vector<StmtPtr>& list, size_t i, int v, int value) {
+    while (i-- > 0) {
+        const Stmt& st = *list[i];
+        if (st.kind != StmtKind::Assign) return false;
+        if (st.varIndex == v) return isConstE(st.valueExpr.get(), value);
+    }
+    return false;
+}
+
+bool exprUsesVar(const Expr* e, int v) {
+    std::set<int> vs;
+    collectVars(e, vs);
+    return vs.count(v) > 0;
+}
+
+bool stmtUsesVar(const Stmt& st, int v) {
+    std::set<int> vs;
+    varsOf(st, vs);
+    return vs.count(v) > 0;
+}
+
+bool readsArray(const Expr* e) {
+    if (!e) return false;
+    if (e->kind == ExprKind::ArrayAccess || e->kind == ExprKind::AuxAccess) return true;
+    return readsArray(e->lhs.get()) || readsArray(e->rhs.get());
+}
+
+// Whether `st` writes the array other than in a block that then returns,
+// or writes scalar variable `v` (v < 0: no variable check).
+bool writesArrayOrVar(const Stmt& st, int v) {
+    if (st.kind == StmtKind::Assign) return st.varIndex == v;
+    if (st.kind == StmtKind::AssignArray || st.kind == StmtKind::AssignAux || st.kind == StmtKind::Swap ||
+        st.kind == StmtKind::Call)
+        return true;
+    auto list = [&](const std::vector<StmtPtr>& l) {
+        bool returns = !l.empty() && l.back()->kind == StmtKind::Return;
+        for (const auto& b : l) {
+            if (b->kind == StmtKind::Assign && b->varIndex == v) return true;
+            if (b->kind == StmtKind::Return) continue;
+            if (b->kind == StmtKind::AssignArray && returns) continue;
+            if (writesArrayOrVar(*b, v)) return true;
+        }
+        return false;
+    };
+    return list(st.body) || list(st.elseBody);
+}
+
+// `v = v + 1` at the end of `body`, `while (v < N)`: the counted loop shape.
+bool countedLoop(const Stmt& w, int& v, const Expr*& n) {
+    if (w.kind != StmtKind::While || w.cond->kind != ExprKind::Lt || w.cond->lhs->kind != ExprKind::Var) return false;
+    v = w.cond->lhs->varIndex;
+    n = w.cond->rhs.get();
+    if (n->kind != ExprKind::Var && n->kind != ExprKind::IntConst) return false;
+    if (isVarE(n, v) || w.body.empty() || !isIncrement(*w.body.back(), v)) return false;
+    return true;
+}
+
+// The comparison `cond` as arr[j] OP x with x free of j (OP normalised so arr[j]
+// is on the left): returns OP, or Add when `cond` is not of that form.
+ExprKind normalisedArrayCompare(const Expr& cond, int j, const Expr*& other) {
+    auto isAj = [&](const Expr* e) { return e->kind == ExprKind::ArrayAccess && isVarE(e->lhs.get(), j); };
+    static const std::pair<ExprKind, ExprKind> flip[] = {{ExprKind::Lt, ExprKind::Gt}, {ExprKind::Gt, ExprKind::Lt},
+                                                        {ExprKind::Le, ExprKind::Ge}, {ExprKind::Ge, ExprKind::Le}};
+    for (auto [k, f] : flip) {
+        if (cond.kind != k) continue;
+        if (isAj(cond.lhs.get()) && !exprUsesVar(cond.rhs.get(), j)) { other = cond.rhs.get(); return k; }
+        if (isAj(cond.rhs.get()) && !exprUsesVar(cond.lhs.get(), j)) { other = cond.lhs.get(); return f; }
+    }
+    return ExprKind::Add;
+}
+
+// t = OP-fold steps: t = t OP ((t >> k) [& mask]).
+StmtPtr foldStep(int t, ExprKind op, int k) { return makeAssign(t, B(op, V(t), B(ExprKind::Shr, V(t), K(k)))); }
+
+void appendPopcount(std::vector<StmtPtr>& out, int t) {
+    out.push_back(makeAssign(t, B(ExprKind::Sub, V(t), B(ExprKind::BitAnd, B(ExprKind::Shr, V(t), K(1)), K(0x55555555)))));
+    out.push_back(makeAssign(t, B(ExprKind::Add, B(ExprKind::BitAnd, V(t), K(0x33333333)),
+                                  B(ExprKind::BitAnd, B(ExprKind::Shr, V(t), K(2)), K(0x33333333)))));
+    out.push_back(makeAssign(t, B(ExprKind::BitAnd, B(ExprKind::Add, V(t), B(ExprKind::Shr, V(t), K(4))), K(0x0f0f0f0f))));
+    out.push_back(makeAssign(t, B(ExprKind::Shr, B(ExprKind::Mul, V(t), K(0x01010101)), K(24))));
+}
+
+void appendReverse32(std::vector<StmtPtr>& out, int t) {
+    const int masks[] = {0x55555555, 0x33333333, 0x0f0f0f0f, 0x00ff00ff};
+    for (int j = 0; j < 4; ++j) {
+        int k = 1 << j;
+        out.push_back(makeAssign(t, B(ExprKind::BitOr, B(ExprKind::BitAnd, B(ExprKind::Shr, V(t), K(k)), K(masks[j])),
+                                      B(ExprKind::Shl, B(ExprKind::BitAnd, V(t), K(masks[j])), K(k)))));
+    }
+    out.push_back(makeAssign(t, B(ExprKind::BitOr, B(ExprKind::BitAnd, B(ExprKind::Shr, V(t), K(16)), K(0xffff)),
+                                  B(ExprKind::Shl, V(t), K(16)))));
+}
+
 struct Mutator {
     Random rng;
     int numVars;
@@ -108,7 +239,18 @@ struct Mutator {
     bool algorithmic = false;  // phase 3c moves (log 190)
     bool returnsValue = true;
     bool reach = false;        // log 203: branch merge and modulus split among the phase 3c moves
+    bool idiom = false;        // log 208: the classical idiom rewrites (moves 7-10)
     bool structural = false;   // some applied edit was a phase 3c move
+    bool idiomApplied = false; // some applied edit was an idiom rewrite
+
+    // A variable the program never mentions (not v0), or -1.
+    int freeVar(const Stmt& root) const {
+        std::set<int> used;
+        varsOf(root, used);
+        for (int v = numVars - 1; v >= 1; --v)
+            if (!used.count(v)) return v;
+        return -1;
+    }
 
     template <class T>
     T& pick(std::vector<T>& v) {
@@ -146,10 +288,281 @@ struct Mutator {
         return makeBinOp(cmp[rng.uniformInt(0, 5)], expr(1), expr(1));
     }
 
+    // Log 208c: move 11, a nested O(n^2) loop over the array -> O(n).
+    // F: the inner loop scans the whole array, `if (arr[j] OP x) { constant
+    //    assignments }`: exists j with arr[j] > x <=> max(arr) > x, so the max
+    //    (min for < <=) is computed once before the outer loop.
+    // E: for i, for j = i + 1 ..: if (arr[i] OP arr[j]) { const result; return }
+    //    -> one pass with the running max (min) of the prefix.
+    bool nestedOnce(Slots& s, const Stmt& root) {
+        std::set<int> used;
+        varsOf(root, used);
+        std::vector<int> fresh;
+        for (int v = numVars - 1; v >= 1 && fresh.size() < 2; --v)
+            if (!used.count(v)) fresh.push_back(v);
+        std::vector<std::pair<std::vector<StmtPtr>*, size_t>> ok;
+        std::vector<std::vector<StmtPtr>> repl;
+        for (auto [l, oi] : sites(s, StmtKind::While)) {
+            const Stmt& outer = *(*l)[oi];
+            int vi;
+            const Expr* nO;
+            if (!countedLoop(outer, vi, nO)) continue;
+            for (size_t k = 0; k + 1 < outer.body.size(); ++k) {
+                const Stmt& inner = *outer.body[k];
+                int vj;
+                const Expr* nI;
+                if (!countedLoop(inner, vj, nI) || vj == vi || inner.body.size() != 2 || k == 0) continue;
+                const Stmt& test = *inner.body[0];
+                if (test.kind != StmtKind::If || !test.elseBody.empty() || test.body.empty()) continue;
+                const Stmt& init = *outer.body[k - 1];
+                if (init.kind != StmtKind::Assign || init.varIndex != vj) continue;
+                const Expr* x = nullptr;
+                ExprKind op = normalisedArrayCompare(*test.cond, vj, x);
+                if (op == ExprKind::Add) continue;
+                bool wantMax = op == ExprKind::Gt || op == ExprKind::Ge;
+                // nothing in the outer loop writes the array (except right before a return) or the bounds
+                bool clean = true;
+                for (const auto& b : outer.body) {
+                    if (b.get() == &inner) continue;
+                    if (writesArrayOrVar(*b, nO->kind == ExprKind::Var ? nO->varIndex : -1)) clean = false;
+                    if (nI->kind == ExprKind::Var && b->kind == StmtKind::Assign && b->varIndex == nI->varIndex) clean = false;
+                }
+                if (!clean) continue;
+                std::vector<StmtPtr> out;
+                bool full = isConstE(init.valueExpr.get(), 0) && exprEqual(nI, nO);
+                bool constAssigns = true;
+                for (const auto& b : test.body)
+                    if (b->kind != StmtKind::Assign || b->valueExpr->kind != ExprKind::IntConst || b->varIndex == vj ||
+                        b->varIndex == vi)
+                        constAssigns = false;
+                if (full && constAssigns && fresh.size() == 2 && !exprUsesVar(x, vj)) {
+                    // F: t = max/min of arr[0 .. N); the inner loop becomes one test.
+                    // (only when N > 0: arr[0] is outside an empty array)
+                    int t = fresh[0], q = fresh[1];
+                    std::vector<StmtPtr> pre;
+                    pre.push_back(makeAssign(t, makeArrayAccess(K(0))));
+                    pre.push_back(makeAssign(q, K(1)));
+                    std::vector<StmtPtr> upd;
+                    upd.push_back(makeAssign(t, makeArrayAccess(V(q))));
+                    std::vector<StmtPtr> body;
+                    body.push_back(makeIf(B(wantMax ? ExprKind::Gt : ExprKind::Lt, makeArrayAccess(V(q)), V(t)), std::move(upd)));
+                    body.push_back(makeAssign(q, B(ExprKind::Add, V(q), K(1))));
+                    pre.push_back(makeWhile(B(ExprKind::Lt, V(q), nO->clone()), std::move(body)));
+                    out.push_back(makeIf(B(ExprKind::Lt, K(0), nO->clone()), std::move(pre)));
+                    Program o = outer.clone();
+                    std::vector<StmtPtr> setsBody;
+                    for (const auto& b : test.body) setsBody.push_back(b->clone());
+                    std::vector<StmtPtr> repInner;
+                    repInner.push_back(makeIf(B(op, V(t), x->clone()), std::move(setsBody)));
+                    std::vector<StmtPtr> jEnd;
+                    jEnd.push_back(makeAssign(vj, nI->clone()));
+                    repInner.push_back(makeIf(B(ExprKind::Lt, V(vj), nI->clone()), std::move(jEnd)));
+                    o->body.erase(o->body.begin() + static_cast<long>(k));
+                    o->body.insert(o->body.begin() + static_cast<long>(k), std::make_move_iterator(repInner.begin()),
+                                   std::make_move_iterator(repInner.end()));
+                    out.push_back(std::move(o));
+                } else {
+                    // E: outer body is exactly { j = i + 1; inner; i++ }, the test returns a result free of i, j.
+                    if (outer.body.size() != 3 || k != 1 || fresh.empty()) continue;
+                    const Expr& iv = *init.valueExpr;
+                    if (!(iv.kind == ExprKind::Add && isVarE(iv.lhs.get(), vi) && isConstE(iv.rhs.get(), 1))) continue;
+                    if (!exprEqual(nI, nO) || x->kind != ExprKind::ArrayAccess || !isVarE(x->lhs.get(), vi)) continue;
+                    if (test.body.back()->kind != StmtKind::Return) continue;
+                    bool free = true;
+                    for (const auto& b : test.body) {
+                        if (stmtUsesVar(*b, vi) || stmtUsesVar(*b, vj) || readsArray(b->valueExpr.get())) free = false;
+                        if (b->kind == StmtKind::AssignArray && readsArray(b->indexExpr.get())) free = false;
+                    }
+                    if (!free) continue;
+                    // exists i < j with arr[j] OP arr[i] <=> exists j with arr[j] OP best(arr[i0 .. j)),
+                    // best the max for < <= (the prefix side is the right operand), the min for > >=.
+                    wantMax = !wantMax;
+                    int t = fresh[0];
+                    std::vector<StmtPtr> body;
+                    body.push_back(makeAssign(t, makeArrayAccess(V(vi))));
+                    body.push_back(makeAssign(vj, B(ExprKind::Add, V(vi), K(1))));
+                    std::vector<StmtPtr> loop;
+                    std::vector<StmtPtr> hit;
+                    for (const auto& b : test.body) hit.push_back(b->clone());
+                    loop.push_back(makeIf(B(op, makeArrayAccess(V(vj)), V(t)), std::move(hit)));
+                    std::vector<StmtPtr> upd;
+                    upd.push_back(makeAssign(t, makeArrayAccess(V(vj))));
+                    loop.push_back(makeIf(B(wantMax ? ExprKind::Gt : ExprKind::Lt, makeArrayAccess(V(vj)), V(t)), std::move(upd)));
+                    loop.push_back(makeAssign(vj, B(ExprKind::Add, V(vj), K(1))));
+                    body.push_back(makeWhile(B(ExprKind::Lt, V(vj), nI->clone()), std::move(loop)));
+                    body.push_back(makeAssign(vi, nO->clone()));
+                    out.push_back(makeIf(outer.cond->clone(), std::move(body)));
+                }
+                ok.push_back({l, oi});
+                repl.push_back(std::move(out));
+                break;
+            }
+        }
+        if (ok.empty()) return false;
+        size_t k = static_cast<size_t>(rng.uniformInt(0, static_cast<int>(ok.size()) - 1));
+        auto [l, i] = ok[k];
+        l->erase(l->begin() + static_cast<long>(i));
+        l->insert(l->begin() + static_cast<long>(i), std::make_move_iterator(repl[k].begin()),
+                  std::make_move_iterator(repl[k].end()));
+        return true;
+    }
+
+    // Log 208: one classical idiom rewrite (7 subtractive division, 8 counted
+    // sum, 9 bit-serial loop, 10 doubling loop); false when the shape is absent.
+    bool idiomOnce(Slots& s, const Stmt& root, int which) {
+        if (which == 11) return nestedOnce(s, root);
+        std::vector<std::pair<std::vector<StmtPtr>*, size_t>> ok;
+        std::vector<std::vector<StmtPtr>> repl;
+        int t = freeVar(root);
+        for (auto [l, i] : sites(s, StmtKind::While)) {
+            const Stmt& w = *(*l)[i];
+            const Expr& c = *w.cond;
+            std::vector<StmtPtr> out;
+            if (which == 7) {  // while (A >= B) { A = A - B; C = C + 1; } -> if (A >= B) { C += A / B; A %= B; }
+                if (c.kind != ExprKind::Ge || c.lhs->kind != ExprKind::Var || w.body.size() != 2) continue;
+                int a = c.lhs->varIndex;
+                const Expr* bE = c.rhs.get();
+                if (bE->kind != ExprKind::Var && bE->kind != ExprKind::IntConst) continue;
+                int cnt = -1;
+                bool sub = false;
+                for (const auto& st : w.body) {
+                    const Expr* d = accumulateOperand(*st, a, ExprKind::Sub);
+                    if (d && exprEqual(d, bE)) sub = true;
+                    else if (st->kind == StmtKind::Assign && st->varIndex != a && isIncrement(*st, st->varIndex))
+                        cnt = st->varIndex;
+                }
+                if (!sub || cnt < 0 || isVarE(bE, cnt)) continue;
+                std::vector<StmtPtr> body;
+                body.push_back(makeAssign(cnt, B(ExprKind::Add, V(cnt), B(ExprKind::Div, V(a), bE->clone()))));
+                body.push_back(makeAssign(a, B(ExprKind::Mod, V(a), bE->clone())));
+                out.push_back(makeIf(c.clone(), std::move(body)));
+            } else if (which == 8) {  // while (i <= m) { s = s + i; i = i + 1; } -> Gauss
+                if ((c.kind != ExprKind::Le && c.kind != ExprKind::Lt) || c.lhs->kind != ExprKind::Var) continue;
+                if (w.body.size() != 2) continue;
+                int iv = c.lhs->varIndex;
+                const Expr* nE = c.rhs.get();
+                if (nE->kind != ExprKind::Var && nE->kind != ExprKind::IntConst) continue;
+                if (isVarE(nE, iv) || !isIncrement(*w.body[1], iv) || w.body[0]->kind != StmtKind::Assign) continue;
+                int sv = w.body[0]->varIndex;
+                const Expr* d = accumulateOperand(*w.body[0], sv, ExprKind::Add);
+                if (sv == iv || !isVarE(d, iv) || isVarE(nE, sv)) continue;
+                auto m = [&]() { return c.kind == ExprKind::Le ? nE->clone() : B(ExprKind::Sub, nE->clone(), K(1)); };
+                auto a = [&]() { return B(ExprKind::Add, V(iv), m()); };
+                auto b = [&]() { return B(ExprKind::Add, B(ExprKind::Sub, m(), V(iv)), K(1)); };
+                // one of a = i + m, b = m - i + 1 is even (a + b is odd): halve that one, exact under wrapping.
+                auto odd = [&]() { return B(ExprKind::BitAnd, a(), K(1)); };
+                ExprPtr prod = B(ExprKind::Mul, B(ExprKind::Shr, a(), B(ExprKind::Sub, K(1), odd())),
+                                 B(ExprKind::Shr, b(), odd()));
+                std::vector<StmtPtr> body;
+                body.push_back(makeAssign(sv, B(ExprKind::Add, V(sv), std::move(prod))));
+                body.push_back(makeAssign(iv, B(ExprKind::Add, m(), K(1))));
+                out.push_back(makeIf(B(ExprKind::Le, V(iv), m()), std::move(body)));
+            } else if (which == 9) {  // for (i = 0; i < W; i++) acc = acc (+|^|<<1|) bit(x, i) -> SWAR
+                if (t < 0 || c.kind != ExprKind::Lt || c.lhs->kind != ExprKind::Var || c.rhs->kind != ExprKind::IntConst)
+                    continue;
+                int iv = c.lhs->varIndex, W = c.rhs->intValue;
+                if (W < 1 || W > 32 || !initialisedTo(*l, i, iv, 0)) continue;
+                int inc = -1, shiftAt = -1, accAt = -1, acc = -1, x = -1, kind = -1;  // kind 0 +, 1 ^, 2 reverse
+                bool shifted = false;
+                for (size_t j = 0; j < w.body.size(); ++j) {
+                    const Stmt& st = *w.body[j];
+                    if (isIncrement(st, iv)) { inc = static_cast<int>(j); continue; }
+                    if (st.kind != StmtKind::Assign) { kind = -2; break; }
+                    const Expr* sh = accumulateOperand(st, st.varIndex, ExprKind::Shr);
+                    if (sh && isConstE(sh, 1) && shiftAt < 0 && accAt >= 0) {
+                        shiftAt = static_cast<int>(j);
+                        x = x < 0 ? st.varIndex : x;
+                        if (st.varIndex != x) { kind = -2; break; }
+                        continue;
+                    }
+                    if (accAt >= 0) { kind = -2; break; }
+                    accAt = static_cast<int>(j);
+                    acc = st.varIndex;
+                    const Expr& e = *st.valueExpr;
+                    const Expr* bit = nullptr;
+                    if (e.kind == ExprKind::BitOr && e.lhs->kind == ExprKind::Shl && isVarE(e.lhs->lhs.get(), acc) &&
+                        isConstE(e.lhs->rhs.get(), 1)) {
+                        kind = 2;
+                        bit = e.rhs.get();
+                    } else if ((bit = accumulateOperand(st, acc, ExprKind::Add))) {
+                        kind = 0;
+                    } else if ((bit = accumulateOperand(st, acc, ExprKind::BitXor))) {
+                        kind = 1;
+                    }
+                    // bit: (x >> i) & 1, or x & 1 with x = x >> 1 later in the body
+                    if (!bit || bit->kind != ExprKind::BitAnd || !isConstE(bit->rhs.get(), 1)) { kind = -2; break; }
+                    const Expr* src = bit->lhs.get();
+                    if (src->kind == ExprKind::Shr && src->lhs->kind == ExprKind::Var && isVarE(src->rhs.get(), iv)) {
+                        x = src->lhs->varIndex;
+                    } else if (src->kind == ExprKind::Var) {
+                        x = src->varIndex;
+                        shifted = true;
+                    } else {
+                        kind = -2;
+                        break;
+                    }
+                }
+                if (kind < 0 || inc < 0 || accAt < 0 || x < 0 || x == acc || x == iv || acc == iv) continue;
+                if (shifted != (shiftAt >= 0) || w.body.size() != static_cast<size_t>(2 + (shifted ? 1 : 0))) continue;
+                if (shifted && inc < shiftAt) continue;
+                int maskW = W == 32 ? -1 : static_cast<int>((1u << W) - 1u);
+                out.push_back(makeAssign(t, W == 32 ? V(x) : B(ExprKind::BitAnd, V(x), K(maskW))));
+                if (kind == 0) {
+                    appendPopcount(out, t);
+                    out.push_back(makeAssign(acc, B(ExprKind::Add, V(acc), V(t))));
+                } else if (kind == 1) {
+                    for (int k = 16; k >= 1; k /= 2) out.push_back(foldStep(t, ExprKind::BitXor, k));
+                    out.push_back(makeAssign(acc, B(ExprKind::BitXor, V(acc), B(ExprKind::BitAnd, V(t), K(1)))));
+                } else {
+                    appendReverse32(out, t);
+                    ExprPtr rev = W == 32 ? V(t) : B(ExprKind::BitAnd, B(ExprKind::Shr, V(t), K(32 - W)), K(maskW));
+                    out.push_back(makeAssign(acc, W == 32 ? std::move(rev)
+                                                          : B(ExprKind::BitOr, B(ExprKind::Shl, V(acc), K(W)), std::move(rev))));
+                }
+                if (shifted) out.push_back(makeAssign(x, B(ExprKind::Shr, V(x), K(W == 32 ? 31 : W))));
+                out.push_back(makeAssign(iv, K(W)));
+            } else {  // which == 10: p = 1; while (p < x) p = p << 1  ->  smear(x - 1) + 1
+                if (t < 0 || c.kind != ExprKind::Lt || c.lhs->kind != ExprKind::Var || w.body.size() != 1) continue;
+                int pv = c.lhs->varIndex;
+                const Expr* xE = c.rhs.get();
+                if (xE->kind != ExprKind::Var && xE->kind != ExprKind::IntConst) continue;
+                if (isVarE(xE, pv) || !initialisedTo(*l, i, pv, 1)) continue;
+                const Stmt& st = *w.body[0];
+                if (st.kind != StmtKind::Assign || st.varIndex != pv) continue;
+                const Expr& e = *st.valueExpr;
+                bool dbl = (e.kind == ExprKind::Shl && isVarE(e.lhs.get(), pv) && isConstE(e.rhs.get(), 1)) ||
+                           (e.kind == ExprKind::Mul && ((isVarE(e.lhs.get(), pv) && isConstE(e.rhs.get(), 2)) ||
+                                                        (isVarE(e.rhs.get(), pv) && isConstE(e.lhs.get(), 2)))) ||
+                           (e.kind == ExprKind::Add && isVarE(e.lhs.get(), pv) && isVarE(e.rhs.get(), pv));
+                if (!dbl) continue;
+                std::vector<StmtPtr> body;
+                body.push_back(makeAssign(t, B(ExprKind::Sub, xE->clone(), K(1))));
+                for (int k = 1; k <= 16; k *= 2) body.push_back(foldStep(t, ExprKind::BitOr, k));
+                body.push_back(makeAssign(pv, B(ExprKind::Add, V(t), K(1))));
+                out.push_back(makeIf(c.clone(), std::move(body)));
+            }
+            ok.push_back({l, i});
+            repl.push_back(std::move(out));
+        }
+        if (ok.empty()) return false;
+        size_t k = static_cast<size_t>(rng.uniformInt(0, static_cast<int>(ok.size()) - 1));
+        auto [l, i] = ok[k];
+        l->erase(l->begin() + static_cast<long>(i));
+        l->insert(l->begin() + static_cast<long>(i), std::make_move_iterator(repl[k].begin()),
+                  std::make_move_iterator(repl[k].end()));
+        return true;
+    }
+
     // Phase 3c (log 190): edits that change the algorithm's shape rather
     // than one node. Unrolling is exact; the others are checked by the tests
     // like any mutant.
-    bool algorithmicOnce(Slots& s, int which = -1) {
+    bool algorithmicOnce(Slots& s, const Stmt& root, int which = -1) {
+        if (which < 0 && idiom && rng.chance(0.5)) which = rng.uniformInt(7, 11);
+        if (which >= 7) {
+            bool ok = idiomOnce(s, root, which);
+            idiomApplied = idiomApplied || ok;
+            return ok;
+        }
         switch (which >= 0 ? which : rng.uniformInt(0, reach ? 6 : 4)) {
             case 0: {  // unroll a loop twice: while (c) { B; if (!c) break; B }
                 auto w = sites(s, StmtKind::While);
@@ -306,7 +719,7 @@ struct Mutator {
         Slots s;
         collect(root, s);
         if (algorithmic && rng.chance(0.25)) {
-            bool ok = algorithmicOnce(s);
+            bool ok = algorithmicOnce(s, root);
             structural = structural || ok;
             return ok;
         }
@@ -593,6 +1006,7 @@ struct Candidate {
     int size = 0;
     bool fromTimed = false;  // a mutant of a timed, measured-fast parent
     bool structural = false; // made by a phase 3c move (log 203)
+    bool idiom = false;      // made by an idiom rewrite (log 208)
 };
 
 struct Timed {
@@ -605,8 +1019,8 @@ struct Timed {
 }  // namespace
 
 Program mutateForSuperopt(const Stmt& program, int numVars, int arity, uint64_t seed, bool algorithmic,
-                          bool returnsValue, bool reach, bool* structural) {
-    Mutator m{Random(seed), numVars, arity, algorithmic, returnsValue, reach};
+                          bool returnsValue, bool reach, bool* structural, bool idiom, bool* idiomApplied) {
+    Mutator m{Random(seed), numVars, arity, algorithmic, returnsValue, reach, idiom};
     Program p = program.clone();
     int edits = 1;
     while (edits < 4 && m.rng.chance(0.35)) ++edits;
@@ -614,16 +1028,17 @@ Program mutateForSuperopt(const Stmt& program, int numVars, int arity, uint64_t 
         for (int tries = 0; tries < 8 && !m.once(*p); ++tries) {
         }
     if (structural) *structural = m.structural;
+    if (idiomApplied) *idiomApplied = m.idiomApplied;
     return p;
 }
 
 Program applyAlgorithmicMove(const Stmt& program, int move, int numVars, int arity, uint64_t seed,
                              bool returnsValue) {
-    Mutator m{Random(seed), numVars, arity, true, returnsValue, true};
+    Mutator m{Random(seed), numVars, arity, true, returnsValue, true, true};
     Program p = program.clone();
     Slots s;
     collect(*p, s);
-    if (!m.algorithmicOnce(s, move)) return nullptr;
+    if (!m.algorithmicOnce(s, *p, move)) return nullptr;
     return p;
 }
 
@@ -1042,10 +1457,15 @@ SuperoptResult Superoptimizer::run() {
                 Candidate c;
                 c.program = mutateForSuperopt(*parent->program, numVars, arity, rng.engine()(),
                                               config_.algorithmicMoves, abi.returnsValue, config_.reachMoves,
-                                              &c.structural);
+                                              &c.structural, config_.idiomMoves, &c.idiom);
                 c.fromTimed = parent->fromTimed;
                 c.size = c.program->size();
-                if (c.size > maxSize) continue;
+                // Log 208: an idiom rewrite (a SWAR block) may outgrow the size
+                // cap meant for local edits; with idiom moves on, the cap also
+                // follows the parent, so such a rewrite can still be refined.
+                int cap = config_.idiomMoves ? std::max(maxSize, parent->size + 20) : maxSize;
+                if (c.idiom) cap = std::max(cap, c.size);
+                if (c.size > cap) continue;
                 c.key = printStmt(*c.program);
                 if (!seen.insert(c.key).second) continue;
                 ++result.evaluated;
@@ -1054,6 +1474,7 @@ SuperoptResult Superoptimizer::run() {
                     c.cost = cost(*c.program);
                     if (c.cost < 0) continue;
                     ++result.correct;
+                    if (c.idiom) ++result.idiomCorrect;
                     fresh.push_back(std::move(c));
                 } else if (c.fails <= failCap) {
                     freshExplore.push_back(std::move(c));

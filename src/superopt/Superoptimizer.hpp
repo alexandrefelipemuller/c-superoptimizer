@@ -64,6 +64,10 @@ struct SuperoptConfig {
     // the beam's equivalents and never be timed). Default since log 203
     // (`--no-reach-moves` restores 202's search).
     bool reachMoves = true;
+    // Log 208: classical idiom rewrites among the phase 3c moves (subtractive
+    // division -> / and %, counted sum -> Gauss, bit-serial popcount / parity /
+    // reversal -> SWAR, doubling loop -> bit smear). Opt-in (`--idiom-moves`).
+    bool idiomMoves = false;
     // Log 206: time candidates inside their program with this command
     // (scripts/program_timer.py SPEC): `CMD CANDIDATE.c TRIALS` prints
     // `REF CAND SPEEDUP`. Empty: the in-loop harness.
@@ -102,6 +106,7 @@ struct SuperoptResult {
     std::string equivalence = "reference";
     int exhaustiveRejected = 0;  // timed winners refuted by the exhaustive check
     int fuzzRejected = 0;        // timed array winners refuted by the mutation fuzz (log 199c)
+    long idiomCorrect = 0;       // correct candidates made by an idiom rewrite (log 208)
     int crossContextRejected = 0;      // winners below the threshold in the other context (log 202)
     double crossContextSelfControl = 0;  // the original against itself there (0: not used)
     double crossContextSpeedup = 0;      // the returned winner's speedup there (0: not used)
@@ -143,11 +148,14 @@ private:
 // loop -> if, strength reduction by powers of two) to a quarter of the
 // edits; off, the edits are exactly those of phase 3.
 Program mutateForSuperopt(const Stmt& program, int numVars, int arity, uint64_t seed, bool algorithmic = false,
-                          bool returnsValue = true, bool reach = false, bool* structural = nullptr);
+                          bool returnsValue = true, bool reach = false, bool* structural = nullptr,
+                          bool idiom = false, bool* idiomApplied = nullptr);
 
 // One specific phase 3c move (0 unroll, 1 branch-free select, 2 early exit,
 // 3 loop -> if, 4 strength reduction, 5 branch merge, 6 divisibility split,
-// log 203), for tests; null when it does not apply.
+// log 203; 7 subtractive division, 8 counted sum, 9 bit-serial loop, 10
+// doubling loop, log 208; 11 nested O(n^2) array loop -> one pass, log 208c),
+// for tests; null when it does not apply.
 Program applyAlgorithmicMove(const Stmt& program, int move, int numVars, int arity, uint64_t seed,
                              bool returnsValue = true);
 

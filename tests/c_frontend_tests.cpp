@@ -147,7 +147,7 @@ TEST(c_import_do_while_and_break) {
 
 TEST(c_import_rejects_constructs_outside_the_subset) {
     CHECK(rejects("int f(int x) { return g(x); }"));
-    CHECK(rejects("int f(int *a, int n) { return *a; }"));
+    CHECK(rejects("int f(int *a, int n) { int x = 0; int *p = &x; return *p; }"));  // pointer to a local
     CHECK(rejects("int f(int x) { int y = x++; return y; }"));
     CHECK(rejects("int f(int x) { long y = x; return y; }"));
     CHECK(rejects("#define SQ(x) ((x) * (x))\nint f(int x) { return SQ(x); }"));  // function-like macro
@@ -427,4 +427,79 @@ TEST(c_import_continue_in_for_with_step_and_do_while) {
         CHECK_EQ(runImport(dw, {x}, ok)[0], expect);
         CHECK(ok);
     }
+}
+
+// ------------------------------------------------ pointers and structs (log 208d)
+
+TEST(c_import_pointers_walk_the_array_parameter) {
+    bool ok = false;
+    CImport sum = importCFunction(
+        "int f(const int *a, int n) { int s = 0; for (const int *p = a; p < a + n; p++) s += *p; return s; }");
+    CHECK_EQ(runImport(sum, {1, 2, 3, 4}, ok)[0], 10);
+    CImport len = importCFunction(
+        "int f(const int *a, int n) { const int *p = a, *end = a + n; while (p != end && *p != 0) p++; return p - a; }");
+    CHECK_EQ(runImport(len, {5, 6, 0, 7}, ok)[0], 2);
+    CHECK_EQ(runImport(len, {5, 6, 7}, ok)[0], 3);
+    // the parameter itself moves: reads inside the loop follow it
+    CImport walk = importCFunction(
+        "int f(const int *a, int n) { int b = 0; while (n > 0) { if (*a > b) b = *a; a++; n--; } return b; }");
+    CHECK_EQ(runImport(walk, {3, 9, 2}, ok)[0], 9);
+    CImport back = importCFunction(
+        "int f(const int *a, int n) { const int *q = &a[n - 1]; while (q >= a && *q >= 0) q--; return q - a; }");
+    CHECK_EQ(runImport(back, {-1, 4, -2, 5}, ok)[0], 2);
+    CHECK_EQ(runImport(back, {1, 4}, ok)[0], -1);
+    CImport rev = importCFunction(
+        "void f(int *a, int n) { int *lo = a, *hi = a + n - 1; while (lo < hi) { int t = *lo; *lo = *hi; *hi = t; lo++; hi--; } }");
+    CHECK(runImport(rev, {1, 2, 3, 4, 5}, ok) == (std::vector<int>{5, 4, 3, 2, 1}));
+    CImport idx = importCFunction("int f(int *a, int n) { int *p = a + 1; p[1] += 5; return p[1] + *(a + 1); }");
+    CHECK_EQ(runImport(idx, {0, 10, 20}, ok)[0], 35);
+}
+
+TEST(c_import_structs_map_onto_the_int_array_of_their_fields) {
+    bool ok = false;
+    const std::string point = "struct Point { int x; int y; };\n";
+    CImport one = importCFunction(point + "int f(const struct Point *p) { return p->x * 10 + (*p).y; }");
+    CHECK(needsAdapter(one.abi));
+    CHECK(!one.abi.hasLength);
+    CHECK_EQ(one.abi.structFields, 2);
+    CHECK_EQ(runImport(one, {4, 7}, ok)[0], 47);
+    CImport many = importCFunction("typedef struct { int x, y; } Pt;\n"
+                                   "int f(const Pt *p, int n) { int s = 0; for (int i = 0; i < n; i++) s += p[i].y; return s; }");
+    CHECK_EQ(many.abi.pointee, std::string("const Pt"));
+    CHECK_EQ(runImport(many, {1, 2, 3, 4, 5, 6}, ok)[0], 12);
+    CHECK_EQ(runImport(many, {1, 2, 3, 4, 5}, ok)[0], 6);  // a trailing partial struct is not an element
+    CImport walk = importCFunction("struct I { int k; int v; int w; };\n"
+                                   "int f(const struct I *it, int n) { const struct I *end = it + n; int s = 0;"
+                                   " for (const struct I *p = it; p < end; p++) s += p->v; return s + (end - it); }");
+    CHECK_EQ(runImport(walk, {0, 1, 0, 0, 2, 0}, ok)[0], 5);
+    CImport upd = importCFunction(point + "void f(struct Point *p, int n) { for (int i = 0; i < n; i++) p[i].y += p[i].x; }");
+    CHECK(runImport(upd, {1, 2, 3, 4}, ok) == (std::vector<int>{1, 3, 3, 7}));
+    CImport u = importCFunction("typedef struct R { unsigned lo; unsigned hi; } R;\n"
+                                "int f(const R *r) { return r->hi > r->lo; }");
+    CHECK_EQ(runImport(u, {1, -1}, ok)[0], 1);  // unsigned compare: 0xffffffff > 1
+    CHECK_EQ(u.abi.structNames, (std::vector<std::string>{"R", "R"}));
+}
+
+TEST(c_import_rejects_struct_and_pointer_forms_outside_the_subset) {
+    const std::string point = "struct Point { int x; int y; };\n";
+    CHECK(rejects(point + "int f(struct Point p) { return p.x; }"));                  // by value
+    CHECK(rejects("struct S { int x; int *q; };\nint f(const struct S *s) { return s->x; }"));  // pointer field
+    CHECK(rejects("struct S { char c; int x; };\nint f(const struct S *s) { return s->x; }"));  // padding
+    CHECK(rejects(point + "int f(const struct Point *p, int k, int n) { return p->x; }"));  // extra scalar
+    CHECK(rejects("int f(const int *a, int n) { return a + n; }"));                     // pointer as int
+    CHECK(rejects("int f(const int *a, int n) { const int *p = a; return p + 1 > 0; }"));  // pointer vs int
+    CHECK(rejects(point + "int f(const struct Point *p) { return p->z; }"));           // no such field
+    CHECK(rejects(point + "int f(const struct Point *p, int n) { struct Point q; return n; }"));  // local struct
+}
+
+TEST(c_emit_struct_function_keeps_the_signature_and_casts_without_copying) {
+    CImport imp = importCFunction("struct Point { int x; int y; };\n"
+                                  "int f(const struct Point *p, int n) { int s = 0; for (int i = 0; i < n; i++) s += p[i].x; return s; }");
+    std::string c = emitCFunction(*imp.program, imp.abi);
+    CHECK(c.find("int f(const struct Point *p, int n)") != std::string::npos);
+    CHECK(c.find("#ifndef ALGOSEARCH_STRUCTS_DEFINED") != std::string::npos);
+    CHECK(c.find("int *a_ = (int *)p;") != std::string::npos);
+    CHECK(c.find("int v0 = n * 2;") != std::string::npos);
+    CHECK(c.find("arr[k_]") == std::string::npos);  // no copy
+    CHECK_EQ(abiAdapter(imp.abi, "g", "f"), std::string("int g(int *a, int n) { (void)n; return f((const struct Point *)a, n / 2); }\n"));
 }

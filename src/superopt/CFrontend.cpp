@@ -262,7 +262,7 @@ int precedence(const std::string& op) {
 // Whether evaluating `e` can never be a runtime error, so evaluating it
 // eagerly (no short circuit) is unobservable.
 bool cannotFail(const CExpr& e) {
-    if (e.op == "index" || e.op == "/" || e.op == "%" || e.op == "<<" || e.op == ">>") return false;
+    if (e.op == "index" || e.op == "deref" || e.op == "field" || e.op == "/" || e.op == "%" || e.op == "<<" || e.op == ">>") return false;
     for (const auto& k : e.kids)
         if (!cannotFail(*k)) return false;
     return true;
@@ -307,6 +307,31 @@ struct Translator {
     };
     std::map<std::string, Helper> helpers;
     std::vector<std::string> inlining;
+
+    // Log 208d: structs of int/unsigned fields, by `struct S` or typedef name.
+    struct StructDef {
+        std::string spelling;  // `struct S` or the typedef name
+        std::vector<std::string> fields;
+        std::vector<CType> types;
+        std::string definition;  // C text that defines `spelling`
+        std::vector<std::string> names;  // identifiers `definition` declares (tag, typedef)
+        int offset(const std::string& f, int line) const {
+            for (size_t k = 0; k < fields.size(); ++k)
+                if (fields[k] == f) return static_cast<int>(k);
+            failAt(line, "no field '" + f + "' in " + spelling);
+        }
+    };
+    std::map<std::string, StructDef> structs;
+    // A pointer into the parameter's array: its index (in ints) lives in `var`
+    // (-1: the parameter itself, index 0); `stride` ints per element.
+    struct PtrVar {
+        int var = -1;
+        int stride = 1;
+        const StructDef* sd = nullptr;
+    };
+    std::map<std::string, PtrVar> ptrs;
+    bool lvalueMode = false;  // parsePostfix: an assignment may follow
+    bool pointeeConst = false;  // the struct parameter is `const struct S *`
 
     const Token& peek(size_t ahead = 0) const { return toks[std::min(pos + ahead, toks.size() - 1)]; }
     bool isPunct(const char* p, size_t ahead = 0) const {
@@ -389,6 +414,84 @@ struct Translator {
         if (isWord("const")) ++pos;
         return c;
     }
+    // `struct S`, `const struct S`, or a typedef name of a struct, at k.
+    bool atStructTypeAt(size_t k) const {
+        if (isWord("const", k)) ++k;
+        if (isWord("struct", k)) return true;
+        return peek(k).kind == Tok::Ident && structs.count(peek(k).text) > 0;
+    }
+    const StructDef& structType() {
+        if (isWord("const")) ++pos;
+        int line = peek().line;
+        std::string key = ident();
+        if (key == "struct") key = "struct " + ident();
+        if (isWord("const")) ++pos;
+        auto it = structs.find(key);
+        if (it == structs.end()) failAt(line, "unknown struct '" + key + "'");
+        return it->second;
+    }
+
+    // Top level: `struct S { fields };`, `typedef struct [S] { fields } T;` or
+    // `typedef struct S T;`. Fields: int/unsigned (32 bits, so no padding).
+    void structDefinition() {
+        int line = peek().line;
+        bool isTypedef = isWord("typedef");
+        if (isTypedef) ++pos;
+        if (!isWord("struct")) failAt(line, "only typedefs of structs are supported");
+        ++pos;
+        std::string tag;
+        if (peek().kind == Tok::Ident) tag = "struct " + ident();
+        StructDef d;
+        if (eat("{")) {
+            while (!eat("}")) {
+                int fl = peek().line;
+                rejectOtherTypes();
+                if (!atIntType()) failAt(fl, "struct fields must be int or unsigned");
+                CType t = intType();
+                if (t.narrow()) failAt(fl, "struct fields narrower than 32 bits not supported (padding)");
+                for (;;) {
+                    if (isPunct("*")) failAt(peek().line, "pointer fields not supported");
+                    std::string f = ident();
+                    if (isPunct("[")) failAt(peek().line, "array fields not supported");
+                    d.fields.push_back(f);
+                    d.types.push_back(t);
+                    if (eat(";")) break;
+                    expect(",");
+                }
+            }
+            if (d.fields.empty()) failAt(line, "empty struct");
+            std::string body = "{";
+            for (size_t k = 0; k < d.fields.size(); ++k) body += " " + d.types[k].spelling + " " + d.fields[k] + ";";
+            body += " }";
+            if (!tag.empty()) {
+                d.spelling = tag;
+                d.definition = tag + " " + body + ";\n";
+                d.names = {tag.substr(7)};
+                structs[tag] = d;
+            }
+            if (isTypedef) {
+                std::string name = ident();
+                StructDef td = d;
+                td.spelling = name;
+                td.names.push_back(name);
+                td.definition = tag.empty() ? "typedef struct " + body + " " + name + ";\n"
+                                            : d.definition + "typedef " + tag + " " + name + ";\n";
+                structs[name] = td;
+            }
+        } else {
+            if (!isTypedef || tag.empty()) failAt(line, "expected a struct definition");
+            auto it = structs.find(tag);
+            if (it == structs.end()) failAt(line, "typedef of an undefined '" + tag + "'");
+            std::string name = ident();
+            StructDef td = it->second;
+            td.spelling = name;
+            td.names.push_back(name);
+            td.definition = it->second.definition + "typedef " + tag + " " + name + ";\n";
+            structs[name] = td;
+        }
+        expect(";");
+    }
+
     CType varType(int v) const {
         auto it = varTypes.find(v);
         return it == varTypes.end() ? CType() : it->second;
@@ -408,6 +511,7 @@ struct Translator {
                          makeIntConst(shift));
     }
     void rejectOtherTypes() {
+        if (atStructTypeAt(0)) return;  // log 208d: checked where a type is parsed
         static const char* other[] = {"long",   "float",  "double", "int64_t", "uint64_t", "size_t", "_Bool",
                                       "bool",   "struct", "union",  "enum",    "typedef",  "goto",   "switch"};
         if (peek().kind != Tok::Ident) return;
@@ -420,7 +524,7 @@ struct Translator {
             auto f = it->find(name);
             if (f != it->end()) return f->second;
         }
-        if (name == arrayName) failAt(line, "array '" + name + "' used as a value (pointer arithmetic not supported)");
+        if (ptrs.count(name)) failAt(line, "pointer '" + name + "' used as an integer");
         failAt(line, "unknown identifier '" + name + "'");
     }
 
@@ -476,8 +580,13 @@ struct Translator {
             e->kids.push_back(parseUnary());
             return e;
         }
-        if (isPunct("++") || isPunct("--") || isPunct("*") || isPunct("&"))
-            failAt(line, "'" + peek().text + "' inside an expression not supported (side effects / pointers)");
+        if (isPunct("++") || isPunct("--"))
+            failAt(line, "'" + peek().text + "' inside an expression not supported (side effects)");
+        if (isPunct("*") || isPunct("&")) {  // log 208d: dereference, address of an element
+            auto e = node(toks[pos++].text == "*" ? "deref" : "addr", line);
+            e->kids.push_back(parseUnary());
+            return e;
+        }
         // A cast between int and unsigned keeps the bits and changes the type;
         // a cast to a narrower type truncates.
         {
@@ -517,13 +626,6 @@ struct Translator {
                     expect(")");
                 }
                 e = std::move(call);
-            } else if (isPunct("[")) {
-                if (t.text != arrayName) failAt(t.line, "'" + t.text + "' is not the array parameter");
-                ++pos;
-                auto ix = node("index", t.line);
-                ix->kids.push_back(parseExpr());
-                expect("]");
-                e = std::move(ix);
             }
         } else if (eat("(")) {
             e = parseExpr();
@@ -532,6 +634,32 @@ struct Translator {
         } else {
             failAt(t.line, "unexpected '" + t.text + "' in expression");
         }
+        // log 208d: postfix chains on pointers: p[i], p->f, p[i].f, (*p).f
+        for (;;) {
+            int line = peek().line;
+            if (eat("[")) {
+                auto ix = node("index", line);
+                ix->kids.push_back(parseExpr());
+                ix->kids.push_back(std::move(e));
+                expect("]");
+                e = std::move(ix);
+            } else if (eat("->")) {
+                auto f = node("field", line);
+                f->name = ident();
+                auto d = node("deref", line);
+                d->kids.push_back(std::move(e));
+                f->kids.push_back(std::move(d));
+                e = std::move(f);
+            } else if (eat(".")) {
+                auto f = node("field", line);
+                f->name = ident();
+                f->kids.push_back(std::move(e));
+                e = std::move(f);
+            } else {
+                break;
+            }
+        }
+        if (lvalueMode) return e;
         static const char* assigns[] = {"=",  "++", "--", "+=", "-=", "*=",  "/=",
                                         "%=", "&=", "|=", "^=", "<<=", ">>="};
         for (const char* a : assigns)
@@ -544,6 +672,83 @@ struct Translator {
     static ExprPtr truth(ExprPtr e) {
         if (isBoolKind(e->kind)) return e;
         return makeBinOp(ExprKind::Ne, std::move(e), makeIntConst(0));
+    }
+
+    // ------------------------------------------------ pointers (log 208d)
+
+    static ExprPtr addIndex(ExprPtr a, ExprPtr b) {
+        if (b->kind == ExprKind::IntConst && b->intValue == 0) return a;
+        if (a->kind == ExprKind::IntConst && a->intValue == 0) return b;
+        return makeBinOp(ExprKind::Add, std::move(a), std::move(b));
+    }
+    static ExprPtr scaled(ExprPtr i, int stride) {
+        if (stride == 1) return i;
+        if (i->kind == ExprKind::IntConst) return makeIntConst(i->intValue * stride);
+        return makeBinOp(ExprKind::Mul, std::move(i), makeIntConst(stride));
+    }
+
+    bool isPointerExpr(const CExpr& e) const {
+        if (e.op == "id") return ptrs.count(e.name) > 0;
+        if (e.op == "addr") return true;
+        if (e.op == "+") return isPointerExpr(*e.kids[0]) != isPointerExpr(*e.kids[1]);
+        if (e.op == "-") return isPointerExpr(*e.kids[0]) && !isPointerExpr(*e.kids[1]);
+        return false;
+    }
+
+    // A pointer-valued expression as its index into arr (in ints).
+    ExprPtr lowerPointer(const CExpr& e, std::vector<StmtPtr>& pre, PtrVar& t) {
+        if (e.op == "id") {
+            auto it = ptrs.find(e.name);
+            if (it == ptrs.end()) failAt(e.line, "'" + e.name + "' is not a pointer into the array parameter");
+            t = it->second;
+            return t.var < 0 ? makeIntConst(0) : makeVar(t.var);
+        }
+        if (e.op == "addr") {
+            const CExpr& x = *e.kids[0];
+            if (x.op == "index" || x.op == "deref") return elementAddress(x, pre, t);
+            if (x.op == "field") {
+                bool u = false;
+                ExprPtr a = scalarAddress(x, pre, u);
+                t = PtrVar{-1, 1, nullptr};
+                return a;
+            }
+            failAt(e.line, "'&' only of an array element or a field (no pointers to locals)");
+        }
+        if (e.op == "+" || e.op == "-") {
+            bool leftPtr = isPointerExpr(*e.kids[0]);
+            if (!leftPtr && e.op == "-") failAt(e.line, "integer minus pointer");
+            ExprPtr base = lowerPointer(leftPtr ? *e.kids[0] : *e.kids[1], pre, t);
+            ExprPtr off = scaled(lower(leftPtr ? *e.kids[1] : *e.kids[0], pre), t.stride);
+            if (e.op == "-") return makeBinOp(ExprKind::Sub, std::move(base), std::move(off));
+            return addIndex(std::move(base), std::move(off));
+        }
+        failAt(e.line, "pointer expression '" + e.op + "' not supported (pointers into the array parameter only)");
+    }
+
+    // The first int of the element an `index` (p[i]) or `deref` (*p) names.
+    ExprPtr elementAddress(const CExpr& x, std::vector<StmtPtr>& pre, PtrVar& t) {
+        if (x.op == "deref") return lowerPointer(*x.kids[0], pre, t);
+        ExprPtr base = lowerPointer(*x.kids[1], pre, t);
+        return addIndex(std::move(base), scaled(lower(*x.kids[0], pre), t.stride));
+    }
+
+    // The index of an int lvalue: *p, p[i] (int pointers) or a field.
+    ExprPtr scalarAddress(const CExpr& x, std::vector<StmtPtr>& pre, bool& isUnsigned) {
+        isUnsigned = false;
+        PtrVar t;
+        if (x.op == "field") {
+            const CExpr& base = *x.kids[0];
+            if (base.op != "deref" && base.op != "index") failAt(x.line, "field of a struct not reached through the pointer parameter");
+            ExprPtr a = elementAddress(base, pre, t);
+            if (!t.sd) failAt(x.line, "'." + x.name + "' on a pointer to int");
+            int off = t.sd->offset(x.name, x.line);
+            isUnsigned = t.sd->types[static_cast<size_t>(off)].isUnsigned;
+            return addIndex(std::move(a), makeIntConst(off));
+        }
+        if (x.op != "index" && x.op != "deref") failAt(x.line, "not an lvalue of the array");
+        ExprPtr a = elementAddress(x, pre, t);
+        if (t.sd) failAt(x.line, "a whole struct used as a value (use its fields)");
+        return a;
     }
 
     // Lowers a C expression to a pure Mini-C expression, appending to `pre`
@@ -564,12 +769,17 @@ struct Translator {
             return makeIntConst(static_cast<int>(static_cast<uint32_t>(e.value)));
         }
         if (e.op == "id") {
+            if (ptrs.count(e.name)) failAt(e.line, "pointer '" + e.name + "' used as an integer");
             int v = lookup(e.name, e.line);
             isUnsigned = varType(v).promotedUnsigned();
             return makeVar(v);
         }
         if (e.op == "call") return inlineCall(e, pre, isUnsigned);
-        if (e.op == "index") return makeArrayAccess(lower(*e.kids[0], pre));
+        if (e.op == "index" || e.op == "deref" || e.op == "field") {
+            ExprPtr a = scalarAddress(e, pre, isUnsigned);
+            return makeArrayAccess(std::move(a));
+        }
+        if (e.op == "addr") failAt(e.line, "an address used as an integer");
         if (e.op == "cast") {
             ExprPtr x = convert(lower(*e.kids[0], pre), e.type);
             isUnsigned = e.type.promotedUnsigned();
@@ -610,6 +820,21 @@ struct Translator {
             return makeVar(t);
         }
         if (binaryKinds().find(e.op) == binaryKinds().end()) failAt(e.line, "operator '" + e.op + "' not supported");
+        bool pa = isPointerExpr(*e.kids[0]), pb = isPointerExpr(*e.kids[1]);
+        if (pa || pb) {
+            // log 208d: p - q (elements) and pointer comparisons, on indices
+            ExprKind k = binaryKinds().at(e.op);
+            bool cmp = isBoolKind(k);
+            if (!(pa && pb) || !(cmp || e.op == "-"))
+                failAt(e.line, "pointer arithmetic with an integer result other than p - q or a comparison");
+            PtrVar ta, tb;
+            ExprPtr a = lowerPointer(*e.kids[0], pre, ta);
+            ExprPtr b = lowerPointer(*e.kids[1], pre, tb);
+            if (ta.stride != tb.stride || ta.sd != tb.sd) failAt(e.line, "pointers to different types");
+            if (cmp) return makeBinOp(k, std::move(a), std::move(b));
+            ExprPtr d = makeBinOp(ExprKind::Sub, std::move(a), std::move(b));
+            return ta.stride == 1 ? std::move(d) : makeBinOp(ExprKind::Div, std::move(d), makeIntConst(ta.stride));
+        }
         bool ua = false, ub = false;
         ExprPtr a = lower(*e.kids[0], pre, ua);
         ExprPtr b = lower(*e.kids[1], pre, ub);
@@ -820,20 +1045,19 @@ struct Translator {
         return out;
     }
 
-    // `x = e`, `x op= e`, `x++`, `++x`, `a[i] = e`, ... without the `;`.
+    // `x = e`, `x op= e`, `x++`, `++x`, `a[i] = e`, `*p = e`, `p->f += e`,
+    // `p++`, `p = q + 1`, ... without the `;`.
     void simpleStatement(std::vector<StmtPtr>& out) {
         int line = peek().line;
         std::string prefix;
         if (isPunct("++") || isPunct("--")) prefix = toks[pos++].text;
-        if (peek().kind != Tok::Ident) failAt(line, "expected an assignment, found '" + peek().text + "'");
-        std::string name = ident();
-        CExprPtr index;
-        if (eat("[")) {
-            if (name != arrayName) failAt(line, "'" + name + "' is not the array parameter");
-            index = parseExpr();
-            expect("]");
-        }
-        if (isPunct("(")) failAt(line, "a call as a statement is not supported ('" + name + "'): its value is unused");
+        if (peek().kind != Tok::Ident && !isPunct("*") && !isPunct("("))
+            failAt(line, "expected an assignment, found '" + peek().text + "'");
+        if (peek().kind == Tok::Ident && isPunct("(", 1))
+            failAt(line, "a call as a statement is not supported ('" + peek().text + "'): its value is unused");
+        lvalueMode = true;
+        CExprPtr target = parseUnary();
+        lvalueMode = false;
         std::string op;  // "=" or the binary operator of a compound/increment
         bool increment = false;
         if (!prefix.empty()) {
@@ -854,31 +1078,89 @@ struct Translator {
             if (op.empty()) failAt(line, "expression statement without an assignment not supported");
         }
         std::vector<StmtPtr> pre;
-        ExprPtr ix = index ? lower(*index, pre) : nullptr;
-        int var = index ? -1 : lookup(name, line);
+        if (target->op == "id" && ptrs.count(target->name)) {
+            // log 208d: a pointer variable moves through the array
+            PtrVar& pv = ptrs[target->name];
+            if (pv.var < 0) failAt(line, "internal: the moving parameter pointer has no variable");
+            ExprPtr value;
+            if (op == "=") {
+                PtrVar t;
+                value = lowerPointer(*parseExpr(), pre, t);
+                if (t.stride != pv.stride || t.sd != pv.sd) failAt(line, "pointers to different types");
+            } else if (op == "+" || op == "-") {
+                ExprPtr d = increment ? makeIntConst(1) : lower(*parseExpr(), pre);
+                value = makeBinOp(op == "+" ? ExprKind::Add : ExprKind::Sub, makeVar(pv.var), scaled(std::move(d), pv.stride));
+            } else {
+                failAt(line, "pointer '" + target->name + "' only moves by + and -");
+            }
+            appendAll(out, pre);
+            out.push_back(makeAssign(pv.var, std::move(value)));
+            return;
+        }
+        bool element = target->op != "id";
+        bool elemUnsigned = false;
+        ExprPtr ix = element ? scalarAddress(*target, pre, elemUnsigned) : nullptr;
+        int var = element ? -1 : lookup(target->name, line);
         ExprPtr value;
         if (op == "=") {
             value = lower(*parseExpr(), pre);
             if (isPunct("=")) failAt(line, "chained assignment not supported");
         } else {
-            ExprPtr cur = index ? makeArrayAccess(ix->clone()) : makeVar(var);
-            bool curUnsigned = !index && varType(var).promotedUnsigned(), operandUnsigned = false, unused = false;
+            if (element) ix = reusable(std::move(ix), pre);
+            ExprPtr cur = element ? makeArrayAccess(ix->clone()) : makeVar(var);
+            bool curUnsigned = element ? elemUnsigned : varType(var).promotedUnsigned(), operandUnsigned = false,
+                 unused = false;
             ExprPtr operand = increment ? makeIntConst(1) : lower(*parseExpr(), pre, operandUnsigned);
             value = binary(op, std::move(cur), curUnsigned, std::move(operand), operandUnsigned, line, pre, unused);
         }
         appendAll(out, pre);
-        if (index) {
+        if (element) {
             out.push_back(makeAssignArray(std::move(ix), std::move(value)));
         } else {
             out.push_back(makeAssign(var, convert(std::move(value), varType(var))));
         }
     }
 
+    // log 208d: `int *p = e, *q;` / `const struct S *p = e;` (pointers into the array parameter).
+    void pointerDeclarator(int stride, const StructDef* sd, std::vector<StmtPtr>& out) {
+        int line = peek().line;
+        if (isWord("const")) ++pos;
+        std::string name = ident();
+        if (isPunct("[")) failAt(line, "local arrays not supported");
+        if (ptrs.count(name) || std::any_of(scopes.begin(), scopes.end(), [&](const auto& m) { return m.count(name) > 0; }))
+            failAt(line, "pointer '" + name + "' shadows another name");
+        PtrVar pv{nextVar++, stride, sd};
+        if (eat("=")) {
+            std::vector<StmtPtr> pre;
+            PtrVar t;
+            ExprPtr init = lowerPointer(*parseExpr(), pre, t);
+            if (t.stride != stride || t.sd != sd) failAt(line, "pointers to different types");
+            appendAll(out, pre);
+            out.push_back(makeAssign(pv.var, std::move(init)));
+        }
+        ptrs[name] = pv;
+    }
+
     void declaration(std::vector<StmtPtr>& out) {
+        if (atStructTypeAt(0)) {
+            const StructDef& sd = structType();
+            for (;;) {
+                if (!eat("*")) failAt(peek().line, "local structs not supported (only pointers into the parameter)");
+                pointerDeclarator(static_cast<int>(sd.fields.size()), &sd, out);
+                if (eat(";")) return;
+                expect(",");
+            }
+        }
         CType type = intType();
         for (;;) {
             int line = peek().line;
-            if (isPunct("*")) failAt(line, "local pointers not supported");
+            if (eat("*")) {
+                if (type.narrow() || type.isUnsigned) failAt(line, "local pointers must be int *");
+                pointerDeclarator(1, nullptr, out);
+                if (eat(";")) return;
+                expect(",");
+                continue;
+            }
             std::string name = ident();
             if (isPunct("[")) failAt(line, "local arrays not supported");
             int v = nextVar++;
@@ -920,7 +1202,7 @@ struct Translator {
             return;
         }
         if (eat(";")) return;
-        if (atIntType()) {
+        if (atIntType() || atStructTypeAt(0)) {
             declaration(out);
             return;
         }
@@ -981,7 +1263,7 @@ struct Translator {
             expect("(");
             scopes.emplace_back();
             std::vector<StmtPtr> init;
-            if (atIntType()) {
+            if (atIntType() || atStructTypeAt(0)) {
                 declaration(init);  // consumes the ';'
             } else {
                 if (!isPunct(";")) {
@@ -1102,6 +1384,10 @@ struct Translator {
         std::vector<Definition> defs;
         while (peek().kind != Tok::End) {
             size_t start = pos;
+            if (isWord("typedef") || (isWord("struct") && (isPunct("{", 2) || isPunct(";", 2)))) {
+                structDefinition();
+                continue;
+            }
             while (isWord("static") || isWord("inline")) ++pos;
             rejectOtherTypes();
             if (isWord("void"))
@@ -1133,6 +1419,26 @@ struct Translator {
         return defs;
     }
 
+    // Whether `name` is assigned in the function body that starts at pos.
+    bool movesInBody(const std::string& name) const {
+        size_t k = pos;
+        while (k < toks.size() && !(toks[k].kind == Tok::Punct && toks[k].text == "{")) ++k;
+        int depth = 0;
+        for (; k < toks.size(); ++k) {
+            const Token& t = toks[k];
+            if (t.kind == Tok::Punct && t.text == "{") ++depth;
+            if (t.kind == Tok::Punct && t.text == "}" && --depth == 0) break;
+            if (t.kind != Tok::Ident || t.text != name) continue;
+            static const char* writes[] = {"++", "--", "+=", "-=", "="};
+            for (const char* w : writes) {
+                if (k + 1 < toks.size() && toks[k + 1].kind == Tok::Punct && toks[k + 1].text == w) return true;
+                if (k > 0 && toks[k - 1].kind == Tok::Punct && toks[k - 1].text == w && w[0] != '=' && w[1] == w[0])
+                    return true;  // ++a / --a
+            }
+        }
+        return false;
+    }
+
     std::vector<StmtPtr> signature() {
         while (isWord("static") || isWord("inline")) ++pos;
         abi.returnsValue = !isWord("void");
@@ -1149,12 +1455,24 @@ struct Translator {
             bool pointer;
             int line;
             CType type;
+            const StructDef* sd = nullptr;
         };
         std::vector<Param> params;
         if (isWord("void") && isPunct(")", 1)) ++pos;
         while (!eat(")")) {
             if (!params.empty()) expect(",");
             int line = peek().line;
+            if (atStructTypeAt(0)) {
+                bool isConst = isWord("const");
+                const StructDef& sd = structType();
+                if (params.empty()) pointeeConst = isConst;
+                if (!eat("*")) failAt(line, "structs by value not supported (pass a pointer)");
+                if (isWord("const")) ++pos;
+                Param p{ident(), true, line, CType(), &sd};
+                if (eat("[")) failAt(line, "write the struct array parameter as a pointer");
+                params.push_back(p);
+                continue;
+            }
             rejectOtherTypes();
             CType type = intType();
             bool pointer = eat("*");
@@ -1171,14 +1489,40 @@ struct Translator {
         scopes.emplace_back();
         bool anyPointer = false;
         for (const auto& p : params) anyPointer = anyPointer || p.pointer;
-        if (anyPointer) {
+        if (anyPointer && params.size() == 1 && params[0].sd) {
+            // log 208d: f(struct S *s): arr holds the one struct's fields
+            const StructDef& sd = *params[0].sd;
+            abi.kind = CFunctionAbi::Kind::Array;
+            abi.hasLength = false;
+            abi.structFields = static_cast<int>(sd.fields.size());
+            abi.pointee = (pointeeConst ? "const " : "") + sd.spelling;
+            abi.preamble = sd.definition;
+            abi.structNames = sd.names;
+            arrayName = params[0].name;
+            ptrs[arrayName] = PtrVar{-1, abi.structFields, &sd};
+        } else if (anyPointer) {
             if (params.size() != 2 || !params[0].pointer || params[1].pointer)
-                failAt(params[0].line, "array functions must have the form f(int *a, int n)");
+                failAt(params[0].line, "array functions must have the form f(int *a, int n) or f(struct S *p, int n)");
             abi.kind = CFunctionAbi::Kind::Array;
             arrayName = params[0].name;
-            scopes.back()[params[1].name] = 0;
             if (params[1].type.narrow()) failAt(params[1].line, "the length parameter must be int or unsigned");
-            if (params[1].type.isUnsigned) varTypes[0] = params[1].type;
+            if (params[0].sd) {
+                // log 208d: v0 counts ints; the element count is v0 / K
+                const StructDef& sd = *params[0].sd;
+                abi.structFields = static_cast<int>(sd.fields.size());
+                abi.pointee = (pointeeConst ? "const " : "") + sd.spelling;
+                abi.preamble = sd.definition;
+                abi.structNames = sd.names;
+                if (params[1].type.isUnsigned) failAt(params[1].line, "the length of a struct array must be int");
+                int len = nextVar++;
+                prologue.push_back(makeAssign(len, makeBinOp(ExprKind::Div, makeVar(0), makeIntConst(abi.structFields))));
+                scopes.back()[params[1].name] = len;
+                ptrs[arrayName] = PtrVar{-1, abi.structFields, &sd};
+            } else {
+                scopes.back()[params[1].name] = 0;
+                if (params[1].type.isUnsigned) varTypes[0] = params[1].type;
+                ptrs[arrayName] = PtrVar{-1, 1, nullptr};
+            }
         } else {
             if (params.empty()) failAt(peek().line, "functions without parameters not supported");
             if (!abi.returnsValue) failAt(peek().line, "a void function of scalars has no observable result");
@@ -1194,7 +1538,14 @@ struct Translator {
         }
         for (const auto& p : params) {
             abi.params.push_back(p.name);
-            abi.paramTypes.push_back(p.type.spelling);
+            abi.paramTypes.push_back(p.sd ? p.sd->spelling : p.type.spelling);
+        }
+        // log 208d: a parameter pointer the body moves (`a++`, `a += k`, `a = ...`)
+        // gets a variable from the start, at index 0 (otherwise it is the constant 0).
+        if (abi.kind == CFunctionAbi::Kind::Array && movesInBody(arrayName)) {
+            PtrVar& pv = ptrs[arrayName];
+            pv.var = nextVar++;
+            prologue.push_back(makeAssign(pv.var, makeIntConst(0)));
         }
         return prologue;
     }
@@ -1472,8 +1823,33 @@ std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
     // The original's signature; inside, every value is an int with the same
     // bits (gcc converts unsigned <-> int modulo 2^32).
     auto type = [&](size_t i) { return (i < abi.paramTypes.size() ? abi.paramTypes[i] : std::string("int")) + " "; };
+    if (abi.structFields > 0) {
+        // log 208d: the struct the signature needs (guarded: a harness that
+        // already has the original's definitions defines the macro first).
+        out << "#ifndef ALGOSEARCH_STRUCTS_DEFINED\n#define ALGOSEARCH_STRUCTS_DEFINED\n" << abi.preamble << "#endif\n";
+    }
     out << (!abi.returnsValue ? std::string("void") : abi.returnType) << " " << abi.name << "(";
-    if (abi.kind == CFunctionAbi::Kind::Array) {
+    if (abi.kind == CFunctionAbi::Kind::Array && abi.structFields > 0) {
+        // log 208d: a struct pointer is the int array of its fields (int fields: no padding)
+        int k = abi.structFields;
+        out << abi.pointee << " *" << names[0];
+        if (abi.hasLength) out << ", " << type(1) << names[1];
+        out << ") {\n";
+        std::string elem = abi.pointee.rfind("const ", 0) == 0 ? abi.pointee.substr(6) : abi.pointee;
+        out << "    _Static_assert(sizeof(" << elem << ") == " << k << " * sizeof(int), \"int fields only\");\n";
+        out << "    int *a_ = (int *)" << names[0] << ";\n";
+        out << "    int v0 = " << (abi.hasLength ? names[1] + " * " + std::to_string(k) : std::to_string(k)) << ";\n";
+        em.arrName = "a_";
+        if (abi.returnsValue) {
+            if (writesArrayBeyondResult(program.body, /*topLevel=*/true)) {
+                out << "    int arr[v0 > 0 ? v0 : 1];\n";
+                out << "    for (int k_ = 0; k_ < v0; k_++) arr[k_] = a_[k_];\n";
+                em.arrName = "arr";
+            } else {
+                em.liftReturn = true;
+            }
+        }
+    } else if (abi.kind == CFunctionAbi::Kind::Array) {
         out << "int *" << names[0] << ", " << type(1) << names[1] << ") {\n";
         out << "    int v0 = " << names[1] << ";\n";
         em.arrName = names[0];
@@ -1517,6 +1893,16 @@ std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
 bool emittedCopiesArray(const Stmt& program, const CFunctionAbi& abi) {
     return abi.kind == CFunctionAbi::Kind::Array && abi.returnsValue &&
            writesArrayBeyondResult(program.body, /*topLevel=*/true);
+}
+
+bool needsAdapter(const CFunctionAbi& abi) { return abi.kind == CFunctionAbi::Kind::Array && abi.structFields > 0; }
+
+std::string abiAdapter(const CFunctionAbi& abi, const std::string& name, const std::string& target) {
+    if (!needsAdapter(abi)) return "";
+    std::string call = target + "((" + abi.pointee + " *)a" +
+                       (abi.hasLength ? ", n / " + std::to_string(abi.structFields) : std::string()) + ")";
+    if (abi.returnsValue) return "int " + name + "(int *a, int n) { (void)n; return " + call + "; }\n";
+    return "void " + name + "(int *a, int n) { (void)n; " + call + "; }\n";
 }
 
 std::vector<int> abiResult(const CFunctionAbi& abi, const std::vector<int>& finalArray) {

@@ -98,7 +98,12 @@ std::string callFor(const CFunctionAbi& abi, const std::string& fn, const std::s
             args += (k ? ", " : "") + std::string("h_data[h_off[i] + ") + std::to_string(k) + "]";
         return "acc += " + fn + "(" + args + ");";
     }
+    std::string target = needsAdapter(abi) ? fn + "_abi" : fn;
     std::string copy = "memcpy(h_buf, h_data + h_off[i], sizeof(int) * h_len[i]); ";
+    if (needsAdapter(abi)) {
+        if (abi.returnsValue) return copy + "acc += " + target + "(h_buf, h_len[i]);";
+        return copy + target + "(h_buf, h_len[i]); acc += h_buf[0];";
+    }
     if (abi.returnsValue) return copy + "acc += " + fn + "(h_buf, h_len[i]);";
     return copy + fn + "(h_buf, h_len[i]); acc += h_buf[0];";
 }
@@ -148,8 +153,22 @@ CompiledTimer::Timing CompiledTimer::time(const std::string& candidateSource, in
         return t;
     }
     std::string src = harnessTemplate;
-    src = replaceAll(src, "%REF%", prefixFunctions(originalSource_, "ref_", abi_.name));
-    src = replaceAll(src, "%CAND%", prefixFunctions(candidateSource, "cand_", abi_.name));
+    // log 208d: struct ABIs are called through an int adapter. Both sources
+    // define the structs (the candidate may be the original itself), so the
+    // candidate's struct tags and typedef names are renamed by macros.
+    std::string ref = prefixFunctions(originalSource_, "ref_", abi_.name);
+    std::string cand = prefixFunctions(candidateSource, "cand_", abi_.name);
+    if (needsAdapter(abi_)) {
+        ref += "\n" + abiAdapter(abi_, "ref_fn_abi", "ref_fn");
+        std::string on, off;
+        for (const auto& n : abi_.structNames) {
+            on += "#define " + n + " cand_struct_" + n + "\n";
+            off += "#undef " + n + "\n";
+        }
+        cand = on + cand + "\n" + abiAdapter(abi_, "cand_fn_abi", "cand_fn") + off;
+    }
+    src = replaceAll(src, "%REF%", ref);
+    src = replaceAll(src, "%CAND%", cand);
     src = replaceAll(src, "%CALL_REF%", callFor(abi_, "ref_fn", byteType_));
     src = replaceAll(src, "%CALL_CAND%", callFor(abi_, "cand_fn", byteType_));
     std::string base = workDir_ + "/t" + std::to_string(compilations_++);

@@ -180,11 +180,14 @@ def noop_source(abi, returns, params):
     return "static void fn(int *a, int n) { (void)a; (void)n; }"
 
 
-def measure_inline(func, abi, returns, params, original, candidate, kept, trials, d):
-    """Each function compiled into the timing loop's own translation unit, renamed to fn."""
+def measure_inline(func, abi, returns, params, original, candidate, kept, trials, d, adapter=None):
+    """Each function compiled into the timing loop's own translation unit, renamed to fn
+    (log 208d: to fn_typed behind the int adapter fn, for a struct signature)."""
     cc = ["gcc", "-O2", "-fwrapv", "-w", "-falign-functions=64", "-falign-loops=64"]
-    sources = [re.sub(rf"\b{func}\b", "fn", open(original).read()),
-               re.sub(rf"\b{func}\b", "fn", open(candidate).read()),
+    target = "fn_typed" if adapter else "fn"
+    tail = "\n" + adapter if adapter else ""
+    sources = [re.sub(rf"\b{func}\b", target, open(original).read()) + tail,
+               re.sub(rf"\b{func}\b", target, open(candidate).read()) + tail,
                noop_source(abi, returns, params)]
     exes = []
     for name, src in zip(("ref", "cand", "noop"), sources):
@@ -219,7 +222,16 @@ def gen_inputs(abi, params, n, rng):
 
 
 
-def linkable(src, func, out, new, signature=None):
+def adapter_text(algosearch, path, new, target):
+    """Log 208d: the int adapter (`int new(int *a, int n)`) calling `target`
+    with the struct pointer, from `algosearch c-import --adapter`."""
+    r = run([algosearch, "c-import", path, "--adapter", new, target])
+    if r.returncode != 0:
+        raise SystemExit(f"adapter failed: {r.stderr.strip()}")
+    return r.stdout
+
+
+def linkable(src, func, out, new, signature=None, adapter=None):
     """A copy of `src` whose target function is not static, so a harness in
     another translation unit can call it (real code, log 192: static helpers
     such as musl's is_leap). Returns it and the gcc flags that rename the
@@ -244,6 +256,9 @@ def linkable(src, func, out, new, signature=None):
         else:
             text += f"\nvoid {new}(int *a, int n) {{ {func}(a, n); }}\n"
         flags = [f"-D{func}={new}_typed"]
+    if adapter:
+        text += "\n" + adapter
+        flags = [f"-D{func}={new}_typed"]
     with open(out, "w") as f:
         f.write(text)
     return out, flags
@@ -259,6 +274,7 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=None, trial
         raise SystemExit(f"import failed: {head.stderr.strip()}")
     m = re.match(r"// (\w+): abi=(\w+) returns=(\w+) params=(\d+)", head.stdout)
     narrow = " narrow=1" in head.stdout.splitlines()[0]
+    adapted = " adapter=1" in head.stdout.splitlines()[0]
     func, abi, returns, params = m.group(1), m.group(2), m.group(3), int(m.group(4))
     d = workdir or tempfile.mkdtemp(prefix="c_speedup_")
     os.makedirs(d, exist_ok=True)
@@ -282,7 +298,9 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=None, trial
         kept = [rng.choice(kept) for _ in range(n_inputs)]
     kept = kept[:n_inputs]
     if inline:
-        ref_ns, cand_ns, noop = measure_inline(func, abi, returns, params, original, candidate, kept, trials, d)
+        adapter = adapter_text(algosearch, original, "fn", "fn_typed") if adapted else None
+        ref_ns, cand_ns, noop = measure_inline(func, abi, returns, params, original, candidate, kept, trials, d,
+                                               adapter)
         return {"func": func, "inputs": len(kept), "ref_ns": ref_ns, "cand_ns": cand_ns, "speedup": ref_ns / cand_ns,
                 "mismatches": 0, "overhead_ns": noop, "order_speedups": [ref_ns / cand_ns] * 2}
     with open(os.path.join(d, "harness.c"), "w") as f:
@@ -294,7 +312,8 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=None, trial
     for src, new in ((original, "ref_fn"), (candidate, "cand_fn")):
         obj = os.path.join(d, new + ".o")
         src, flags = linkable(src, func, os.path.join(d, new + "_src.c"), new,
-                              (abi, returns, params) if narrow else None)
+                              (abi, returns, params) if narrow else None,
+                              adapter_text(algosearch, original, new, new + "_typed") if adapted else None)
         r = run(cc + flags + ["-c", src, "-o", obj])
         if r.returncode != 0:
             raise SystemExit(f"gcc failed on {src}: {r.stderr.strip()[:400]}")

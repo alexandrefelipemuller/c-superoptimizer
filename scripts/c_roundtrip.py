@@ -102,7 +102,16 @@ def harness_source(abi, returns, params):
 
 
 
-def linkable(src, func, out, new, signature=None):
+def adapter_text(algosearch, path, new, target):
+    """Log 208d: the int adapter (`int new(int *a, int n)`) calling `target`
+    with the struct pointer, from `algosearch c-import --adapter`."""
+    r = run([algosearch, "c-import", path, "--adapter", new, target])
+    if r.returncode != 0:
+        raise SystemExit(f"adapter failed: {r.stderr.strip()}")
+    return r.stdout
+
+
+def linkable(src, func, out, new, signature=None, adapter=None):
     """A copy of `src` whose target function is not static, so a harness in
     another translation unit can call it (real code, log 192: static helpers
     such as musl's is_leap). Returns it and the gcc flags that rename the
@@ -127,6 +136,9 @@ def linkable(src, func, out, new, signature=None):
         else:
             text += f"\nvoid {new}(int *a, int n) {{ {func}(a, n); }}\n"
         flags = [f"-D{func}={new}_typed"]
+    if adapter:
+        text += "\n" + adapter
+        flags = [f"-D{func}={new}_typed"]
     with open(out, "w") as f:
         f.write(text)
     return out, flags
@@ -142,6 +154,7 @@ def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout
         return False, f"import failed: {head.stderr.strip()}"
     m = re.match(r"// (\w+): abi=(\w+) returns=(\w+) params=(\d+)", head.stdout)
     narrow = " narrow=1" in head.stdout.splitlines()[0]
+    adapted = " adapter=1" in head.stdout.splitlines()[0]
     func, abi, returns, params = m.group(1), m.group(2), m.group(3), int(m.group(4))
     if candidate:
         with open(candidate) as f:
@@ -160,7 +173,8 @@ def check(path, algosearch, workdir, n_inputs, rng, min_compared, native_timeout
     cc = ["gcc", "-O2", "-fwrapv", "-w"]
     for src, obj, new in ((path, "ref.o", "ref_fn"), (os.path.join(d, "emitted.c"), "emit.o", "emit_fn")):
         src, flags = linkable(src, func, os.path.join(d, new + "_src.c"), new,
-                              (abi, returns, params) if narrow else None)
+                              (abi, returns, params) if narrow else None,
+                              adapter_text(algosearch, path, new, new + "_typed") if adapted else None)
         r = run(cc + flags + ["-c", src, "-o", os.path.join(d, obj)])
         if r.returncode != 0:
             return False, f"gcc failed on {src}: {r.stderr.strip()[:400]}"

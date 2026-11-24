@@ -31,6 +31,16 @@ struct CFunctionAbi {
     std::vector<std::string> paramTypes;
     // Mini-C variables the translated program uses, v0 included.
     int numVars = 1;
+    // Log 208d: a pointer to structs of K int/unsigned fields (no padding)
+    // maps onto the int array of their fields, arr = (int *)p, element i's
+    // field f at arr[i * K + f]. K = 0: an `int *` parameter. With a length
+    // parameter, Mini-C's v0 counts ints (n * K) and the program divides;
+    // without one (`f(struct S *s)`), arr holds one struct.
+    int structFields = 0;
+    bool hasLength = true;
+    std::string pointee = "int";  // C spelling of the pointed-to type
+    std::string preamble;         // struct / typedef definitions the signature needs
+    std::vector<std::string> structNames;  // the tags and typedef names the preamble defines
 };
 
 struct CImport {
@@ -47,7 +57,9 @@ struct CImportError : std::runtime_error {
 // Translates one function of `source` (the only one, or the one named
 // `funcName`) into Mini-C. Supported subset: integer scalars and locals of
 // up to 32 bits (`int`, `unsigned`, `char`, `short`, signed or unsigned) and
-// locals, one array parameter, if/else, while, do-while, for, break,
+// locals, one array parameter (`int *` or a pointer to structs of int
+// fields, log 208d), local pointers into it (`*p`, `p[i]`, `p->f`, `p++`,
+// `p - q`, pointer comparisons), if/else, while, do-while, for, break,
 // continue, return, assignment and compound assignment, ++/--, the
 // arithmetic, bitwise, comparison, logical (short-circuit preserved) and
 // conditional operators. Everything else throws CImportError.
@@ -67,6 +79,13 @@ bool emittedCopiesArray(const Stmt& program, const CFunctionAbi& abi);
 // The Mini-C input array of a call is the argument list itself (Scalars) or
 // the array (Array). The call's result, read back from the final array: one
 // value, or the whole array for a void array function.
+// Log 208d: whether a harness must call the function through an adapter
+// (a struct pointer parameter), and that adapter: `int|void NAME(int *a, int n)`
+// calling TARGET with the struct pointer (and n / K elements). The adapter's
+// translation unit must see the struct definitions (the original's source).
+bool needsAdapter(const CFunctionAbi& abi);
+std::string abiAdapter(const CFunctionAbi& abi, const std::string& name, const std::string& target);
+
 std::vector<int> abiResult(const CFunctionAbi& abi, const std::vector<int>& finalArray);
 
 }  // namespace algosearch
