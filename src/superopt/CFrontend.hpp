@@ -41,6 +41,9 @@ struct CFunctionAbi {
     std::string pointee = "int";  // C spelling of the pointed-to type
     std::string preamble;         // struct / typedef definitions the signature needs
     std::vector<std::string> structNames;  // the tags and typedef names the preamble defines
+    // Log 210: `size_t`, `long`... appear and are computed in 32 bits; the
+    // result is valid only while their values fit (stated, not checked).
+    bool wide32 = false;
 };
 
 struct CImport {

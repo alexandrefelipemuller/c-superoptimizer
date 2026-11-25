@@ -8,8 +8,16 @@ function (file, name, OK or the reason) and, on stderr, the reasons ranked.
     scripts/c_census.py --out census.tsv --keep DIR SRC_DIR_OR_FILE...
 
 With --keep, every function that imports is saved as DIR/<file>__<name>.c.
+
+Log 209, --preprocess: each file goes through `gcc -E` first (--cflags, plus
+-I for every directory under the given paths that holds a .h with
+--auto-include), and each function is imported with what it reaches in the
+translation unit (scripts/c_preprocess.py): typedefs, structs, helpers, enum
+constants. A file that does not preprocess counts each of its functions
+(split from the raw text) with the reason "preprocess failed".
 """
 import argparse
+import shlex
 import collections
 import os
 import re
@@ -93,7 +101,20 @@ def main():
     ap.add_argument("--algosearch", default="./algosearch")
     ap.add_argument("--out", required=True)
     ap.add_argument("--keep", default=None)
+    ap.add_argument("--preprocess", action="store_true")
+    ap.add_argument("--cflags", default="")
+    ap.add_argument("--auto-include", action="store_true")
     args = ap.parse_args()
+    cflags = shlex.split(args.cflags)
+    if args.auto_include:
+        dirs = set()
+        for p in args.paths:
+            for root, _, names in os.walk(p if os.path.isdir(p) else os.path.dirname(p) or "."):
+                if any(n.endswith(".h") for n in names):
+                    dirs.add(root)
+        cflags += ["-I" + d for d in sorted(dirs)]
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import c_preprocess
     files = []
     for p in args.paths:
         if os.path.isdir(p):
@@ -112,12 +133,23 @@ def main():
                 src = open(f, errors="replace").read()
             except OSError:
                 continue
-            for name, text in functions(src):
+            if args.preprocess:
+                found, err = c_preprocess.units(f, cflags + ["-I" + os.path.dirname(f)])
+                if err:
+                    for name, _ in functions(src):
+                        total += 1
+                        reasons[err[:60]] += 1
+                        out.write(f"{f}\t{name}\t{err}\n")
+                    continue
+                todo = [(name, unit, ["--func", name]) for name, unit in found]
+            else:
+                todo = [(name, text, []) for name, text in functions(src)]
+            for name, text, more in todo:
                 total += 1
                 path = os.path.join(tmp, "f.c")
                 with open(path, "w") as g:
                     g.write(text + "\n")
-                r = subprocess.run([args.algosearch, "c-import", path], capture_output=True, text=True)
+                r = subprocess.run([args.algosearch, "c-import", path] + more, capture_output=True, text=True)
                 if r.returncode == 0:
                     ok += 1
                     status = "OK"

@@ -149,7 +149,7 @@ TEST(c_import_rejects_constructs_outside_the_subset) {
     CHECK(rejects("int f(int x) { return g(x); }"));
     CHECK(rejects("int f(int *a, int n) { int x = 0; int *p = &x; return *p; }"));  // pointer to a local
     CHECK(rejects("int f(int x) { int y = x++; return y; }"));
-    CHECK(rejects("int f(int x) { long y = x; return y; }"));
+    CHECK(importCFunction("int f(int x) { long y = x; return y; }").abi.wide32);  // log 210: modelled in 32 bits
     CHECK(rejects("#define SQ(x) ((x) * (x))\nint f(int x) { return SQ(x); }"));  // function-like macro
     CHECK(rejects("#if 1\nint f(int x) { return x; }\n#endif"));
     CHECK(rejects("int f(int x) { return x; } int g(int x) { return x; }"));  // ambiguous without a name
@@ -257,7 +257,7 @@ TEST(c_import_unsigned_compares_shifts_literals_and_helpers) {
     bool ok = true;
     runImport(shift, {-1, 32}, ok);
     CHECK(!ok);
-    CHECK(rejects("int f(int x) { return (unsigned long)x; }"));
+    CHECK(importCFunction("int f(int x) { return (unsigned long)x; }").abi.wide32);  // log 210
     CHECK(rejects("int f(unsigned *a, int n) { return a[0]; }"));
     CHECK(rejects("int f(int x) { return x + 1UL; }"));
     CHECK(rejects("int f(int x) { return x < 3000000000; }"));  // a long in C
@@ -364,10 +364,8 @@ TEST(c_import_char_and_short_truncate_on_storage_and_promote_in_expressions) {
                 if (ok) CHECK_EQ(r[0], c.native(x, y));
             }
     }
-    CHECK(rejects("int f(char *s, int n) { return s[0]; }"));  // only int arrays
+    CHECK(!rejects("int f(char *s, int n) { return s[0]; }"));  // log 210: byte buffers import
     CHECK(rejects("int f(int *a, char n) { return a[0]; }"));
-    CHECK(rejects("int f(int x) { long y = x; return y; }"));
-    CHECK(rejects("int f(int x) { return (unsigned long)x; }"));
 }
 
 TEST(c_import_inlines_single_return_helpers_once_per_argument) {
@@ -502,4 +500,38 @@ TEST(c_emit_struct_function_keeps_the_signature_and_casts_without_copying) {
     CHECK(c.find("int v0 = n * 2;") != std::string::npos);
     CHECK(c.find("arr[k_]") == std::string::npos);  // no copy
     CHECK_EQ(abiAdapter(imp.abi, "g", "f"), std::string("int g(int *a, int n) { (void)n; return f((const struct Point *)a, n / 2); }\n"));
+}
+
+TEST(c_import_byte_buffers_load_converted_and_store_truncated) {
+    bool ok = false;
+    CImport u = importCFunction("int f(const unsigned char *p, int n) { int s = 0; for (int i = 0; i < n; i++) s += p[i]; return s; }");
+    CHECK(needsAdapter(u.abi));
+    CHECK_EQ(u.abi.pointee, std::string("const unsigned char"));
+    CHECK_EQ(runImport(u, {-1, 256, 3}, ok)[0], 255 + 0 + 3);  // the ints read as the bytes the adapter builds
+    CImport sc = importCFunction("int f(const signed char *p, int n) { const signed char *e = p + n; int s = 0; while (p < e) { s += *p; p++; } return s; }");
+    CHECK_EQ(runImport(sc, {255, 1}, ok)[0], 0);  // 255 is the byte -1
+    CImport st = importCFunction("int f(unsigned char *p, int n) { p[0] = 300; p[1] += 250; return p[0] + p[1]; }");
+    CHECK_EQ(runImport(st, {0, 10}, ok)[0], 44 + 4);  // stores wrap at 8 bits
+    CImport sh = importCFunction("int f(const short *p, int n) { return n > 0 ? p[0] : 0; }");
+    CHECK_EQ(runImport(sh, {65535}, ok)[0], -1);
+    std::string c = emitCFunction(*u.program, u.abi);
+    CHECK(c.find("int f(const unsigned char *p, int n)") != std::string::npos);
+    CHECK_EQ(abiAdapter(u.abi, "g", "f"),
+             std::string("int g(int *a, int n) { unsigned char b_[n > 0 ? n : 1]; for (int k_ = 0; k_ < n; k_++) b_[k_] = "
+                         "(unsigned char)a[k_]; return f(b_, n); }\n"));
+}
+
+TEST(c_import_models_64_bit_lengths_in_32_bits_and_says_so) {
+    bool ok = false;
+    CImport s = importCFunction("unsigned long f(const unsigned char *p, size_t len) { unsigned long h = 0;"
+                                " for (size_t i = 0; i < len; i++) h = h * 33 + p[i]; return h; }");
+    CHECK(s.abi.wide32);
+    CHECK_EQ(runImport(s, {1, 2}, ok)[0], 35);
+    std::string c = emitCFunction(*s.program, s.abi);
+    CHECK(c.find("unsigned long f(const unsigned char *p, size_t len)") != std::string::npos);
+    CHECK(c.find("#include <stddef.h>") != std::string::npos);
+    CHECK(!importCFunction("int f(const int *a, int n) { return n; }").abi.wide32);
+    CHECK(rejects("long f(long x) { return x + 1; }"));                                    // 64-bit scalar parameter
+    CHECK(rejects("void f(unsigned char *p, int n) { p[0] = 1; }"));                      // byte write-back
+    CHECK(rejects("int f(const unsigned char *p, int n) { const int *q = 0; return n; }"));  // other element type
 }

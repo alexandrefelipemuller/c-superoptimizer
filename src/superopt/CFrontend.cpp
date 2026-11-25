@@ -50,12 +50,104 @@ void defineMacro(const std::string& directive, int line, Defines& defines) {
     defines[m[1].str()] = body;
 }
 
+// Log 209: GNU spellings that `gcc -E` leaves in system and project headers
+// and that do not change the integer semantics: `__extension__`, `restrict`
+// and its spellings, `register`, `__inline__`, and `__attribute__((...))` /
+// `__asm__(...)` with their balanced parentheses.
+std::vector<Token> dropGnuNoise(std::vector<Token> in) {
+    static const std::set<std::string> drop = {"__extension__", "__restrict", "__restrict__", "restrict", "register"};
+    static const std::set<std::string> withParens = {"__attribute__", "__attribute", "__asm__", "__asm", "asm"};
+    std::vector<Token> out;
+    for (size_t i = 0; i < in.size(); ++i) {
+        const Token& t = in[i];
+        if (t.kind == Tok::Ident && drop.count(t.text)) continue;
+        if (t.kind == Tok::Ident && (t.text == "__inline" || t.text == "__inline__")) {
+            Token k = t;
+            k.text = "inline";
+            out.push_back(k);
+            continue;
+        }
+        if (t.kind == Tok::Ident && withParens.count(t.text) && i + 1 < in.size() && in[i + 1].kind == Tok::Punct &&
+            in[i + 1].text == "(") {
+            int depth = 0;
+            size_t j = i + 1;
+            for (; j < in.size(); ++j) {
+                if (in[j].kind != Tok::Punct) continue;
+                if (in[j].text == "(") ++depth;
+                if (in[j].text == ")" && --depth == 0) break;
+            }
+            i = j;
+            continue;
+        }
+        out.push_back(t);
+    }
+    return out;
+}
+
+// Log 209: `typedef <integer type> NAME;` at file scope. Its tokens are
+// removed and every later NAME is replaced by the type's words, so `uInt x`
+// reads as `unsigned int x`. Only typedefs made of integer type words (or of
+// earlier such typedefs) qualify; `long` ones expand too and are then rejected
+// where the type is parsed, with the real reason. Struct typedefs are left
+// for the parser.
+std::vector<Token> expandIntTypedefs(const std::vector<Token>& in) {
+    static const std::set<std::string> words = {"const",   "volatile", "signed",   "unsigned", "int",     "char",
+                                                "short",   "long",     "int8_t",   "uint8_t",  "int16_t", "uint16_t",
+                                                "int32_t", "uint32_t", "int64_t",  "uint64_t", "size_t"};
+    std::map<std::string, std::vector<Token>> names;
+    std::vector<Token> out;
+    int depth = 0;
+    for (size_t i = 0; i < in.size(); ++i) {
+        const Token& t = in[i];
+        if (t.kind == Tok::Punct && t.text == "{") ++depth;
+        if (t.kind == Tok::Punct && t.text == "}") --depth;
+        if (depth == 0 && t.kind == Tok::Ident && t.text == "typedef") {
+            std::vector<Token> type;
+            size_t j = i + 1;
+            bool ok = true;
+            for (; j < in.size() && !(in[j].kind == Tok::Punct && in[j].text == ";"); ++j) {
+                if (in[j].kind != Tok::Ident) {
+                    ok = false;
+                    break;
+                }
+                auto n = names.find(in[j].text);
+                if (n != names.end())
+                    type.insert(type.end(), n->second.begin(), n->second.end());
+                else
+                    type.push_back(in[j]);
+            }
+            // type = words..., NAME
+            if (ok && j < in.size() && type.size() >= 2 && in[j - 1].kind == Tok::Ident &&
+                !names.count(in[j - 1].text)) {
+                type.pop_back();
+                for (const Token& w : type)
+                    if (!words.count(w.text)) ok = false;
+                if (ok) {
+                    names[in[j - 1].text] = type;
+                    i = j;  // skip through the `;`
+                    continue;
+                }
+            }
+        }
+        auto n = t.kind == Tok::Ident ? names.find(t.text) : names.end();
+        if (n != names.end()) {
+            for (Token w : n->second) {
+                w.line = t.line;
+                out.push_back(w);
+            }
+            continue;
+        }
+        out.push_back(t);
+    }
+    return out;
+}
+
 std::vector<Token> lex(const std::string& src) {
     Defines defines;
     defines["INT_MAX"] = lexWith("2147483647", defines);
     defines["INT_MIN"] = lexWith("(-2147483647 - 1)", defines);
     for (auto& [name, body] : defines) body.pop_back();
-    return lexWith(src, defines);
+    return expandIntTypedefs(dropGnuNoise(lexWith(src, defines)));
 }
 
 std::vector<Token> lexWith(const std::string& src, Defines& defines) {
@@ -84,6 +176,10 @@ std::vector<Token> lexWith(const std::string& src, Defines& defines) {
             std::string directive = src.substr(i, e == std::string::npos ? std::string::npos : e - i);
             if (std::regex_search(directive, std::regex("^#\\s*define\\b")))
                 defineMacro(directive, line, defines);
+            // Log 209: `gcc -E` output keeps line markers (`# 12 "f.c" 2`) and
+            // pragmas; neither changes the code.
+            else if (std::regex_search(directive, std::regex("^#\\s*([0-9]|line\\b|pragma\\b|ident\\b)")))
+                ;
             else if (!std::regex_search(directive, std::regex("^#\\s*include\\b")))
                 failAt(line, "preprocessor directive not supported (only #include and constant #define): " +
                                  directive);
@@ -212,6 +308,7 @@ struct CType {
     int bits = 32;
     bool isUnsigned = false;
     std::string spelling = "int";  // as the emitter writes it (no <stdint.h> names)
+    bool wide = false;  // log 210: a 64-bit C type, modelled in 32 bits
     bool narrow() const { return bits < 32; }
     bool promotedUnsigned() const { return bits == 32 && isUnsigned; }
     bool same(const CType& o) const { return bits == o.bits && isUnsigned == o.isUnsigned; }
@@ -322,6 +419,16 @@ struct Translator {
         }
     };
     std::map<std::string, StructDef> structs;
+    // Log 209: structs the prototype cannot represent (pointer, array, narrow
+    // fields...), by tag and typedef name, with the reason. A file may carry
+    // them (headers); a function that uses one is rejected with that reason.
+    std::map<std::string, std::string> badStructs;
+    // Log 209: names of skipped typedefs (pointer, array, union, function,
+    // `long`...), so that using one reports the type instead of a parse error.
+    std::set<std::string> otherTypedefs;
+    // Log 210: `typedef struct S T;` before `struct S { ... }` (C allows it,
+    // headers do it): T is bound when S is defined.
+    std::map<std::string, std::vector<std::string>> pendingAliases;
     // A pointer into the parameter's array: its index (in ints) lives in `var`
     // (-1: the parameter itself, index 0); `stride` ints per element.
     struct PtrVar {
@@ -332,6 +439,12 @@ struct Translator {
     std::map<std::string, PtrVar> ptrs;
     bool lvalueMode = false;  // parsePostfix: an assignment may follow
     bool pointeeConst = false;  // the struct parameter is `const struct S *`
+    // Log 210: the element type of the array parameter. 8- and 16-bit
+    // elements are loaded with their conversion (zero- or sign-extended) and
+    // stored truncated, so the int array the harness passes reads like the
+    // byte buffer the adapter builds from it.
+    CType elemType;
+    bool wideUsed = false;  // log 210: a 64-bit type was modelled in 32 bits
 
     const Token& peek(size_t ahead = 0) const { return toks[std::min(pos + ahead, toks.size() - 1)]; }
     bool isPunct(const char* p, size_t ahead = 0) const {
@@ -359,7 +472,8 @@ struct Translator {
     bool atIntTypeAt(size_t k) const {
         if (isWord("const", k)) ++k;
         for (const char* w : {"int", "int32_t", "signed", "unsigned", "uint32_t", "char", "short", "uint8_t", "int8_t",
-                              "uint16_t", "int16_t"})
+                              "uint16_t", "int16_t", "long", "size_t", "ssize_t", "uint64_t", "int64_t", "ptrdiff_t",
+                              "uintptr_t", "intptr_t"})
             if (isWord(w, k)) return true;
         return false;
     }
@@ -377,7 +491,36 @@ struct Translator {
             return c;
         };
         CType c;
-        if (t == "int" || t == "int32_t") {
+        // Log 210: 64-bit types are modelled in 32 bits (`wide`), under the
+        // stated assumption that their values fit; the import header says so.
+        auto wide = [&](bool u, const std::string& spelling) {
+            CType w = make(32, u, "int");
+            w.wide = true;
+            w.spelling = spelling;
+            wideUsed = true;
+            return w;
+        };
+        // `long`, `unsigned long int`, `long unsigned int` (glibc's size_t),
+        // `long long`... : C allows the words in any order.
+        auto longType = [&](bool u, int longs) {
+            while (isWord("long") || isWord("int") || isWord("unsigned") || isWord("signed")) {
+                if (isWord("long")) ++longs;
+                if (isWord("unsigned")) u = true;
+                ++pos;
+            }
+            return wide(u, std::string(u ? "unsigned " : "") + (longs > 1 ? "long long" : "long"));
+        };
+        if (t == "size_t" || t == "uint64_t" || t == "uintptr_t") {
+            c = wide(true, t);
+        } else if (t == "ssize_t" || t == "int64_t" || t == "ptrdiff_t" || t == "intptr_t") {
+            c = wide(false, t);
+        } else if (t == "long") {
+            c = longType(false, 1);
+        } else if ((t == "signed" || t == "unsigned") && isWord("long")) {
+            c = longType(t == "unsigned", 0);
+        } else if (t == "int" && isWord("long")) {
+            c = longType(false, 0);
+        } else if (t == "int" || t == "int32_t") {
             c = make(32, false, "int");
         } else if (t == "uint32_t") {
             c = make(32, true, "unsigned");
@@ -396,7 +539,6 @@ struct Translator {
             c = make(16, false, "short");
         } else if (t == "signed" || t == "unsigned") {
             bool u = t == "unsigned";
-            if (isWord("long")) failAt(line, "type '" + t + " long' not supported (up to 32 bits)");
             if (isWord("char")) {
                 ++pos;
                 c = make(8, u, u ? "unsigned char" : "signed char");
@@ -418,7 +560,7 @@ struct Translator {
     bool atStructTypeAt(size_t k) const {
         if (isWord("const", k)) ++k;
         if (isWord("struct", k)) return true;
-        return peek(k).kind == Tok::Ident && structs.count(peek(k).text) > 0;
+        return peek(k).kind == Tok::Ident && (structs.count(peek(k).text) > 0 || badStructs.count(peek(k).text) > 0);
     }
     const StructDef& structType() {
         if (isWord("const")) ++pos;
@@ -427,7 +569,11 @@ struct Translator {
         if (key == "struct") key = "struct " + ident();
         if (isWord("const")) ++pos;
         auto it = structs.find(key);
-        if (it == structs.end()) failAt(line, "unknown struct '" + key + "'");
+        if (it == structs.end()) {
+            auto bad = badStructs.find(key);
+            if (bad != badStructs.end()) failAt(line, "struct '" + key + "': " + bad->second);
+            failAt(line, "unknown struct '" + key + "'");
+        }
         return it->second;
     }
 
@@ -468,6 +614,15 @@ struct Translator {
                 d.definition = tag + " " + body + ";\n";
                 d.names = {tag.substr(7)};
                 structs[tag] = d;
+                for (const auto& alias : pendingAliases[tag]) {
+                    StructDef td = d;
+                    td.spelling = alias;
+                    td.names.push_back(alias);
+                    td.definition = "typedef " + tag + " " + alias + ";\n" + d.definition;
+                    structs[alias] = td;
+                    badStructs.erase(alias);
+                }
+                pendingAliases.erase(tag);
             }
             if (isTypedef) {
                 std::string name = ident();
@@ -481,7 +636,13 @@ struct Translator {
         } else {
             if (!isTypedef || tag.empty()) failAt(line, "expected a struct definition");
             auto it = structs.find(tag);
-            if (it == structs.end()) failAt(line, "typedef of an undefined '" + tag + "'");
+            if (it == structs.end()) {
+                std::string name = ident();
+                expect(";");
+                pendingAliases[tag].push_back(name);
+                badStructs[name] = "typedef of an undefined '" + tag + "'";
+                return;
+            }
             std::string name = ident();
             StructDef td = it->second;
             td.spelling = name;
@@ -512,9 +673,11 @@ struct Translator {
     }
     void rejectOtherTypes() {
         if (atStructTypeAt(0)) return;  // log 208d: checked where a type is parsed
-        static const char* other[] = {"long",   "float",  "double", "int64_t", "uint64_t", "size_t", "_Bool",
+        static const char* other[] = {"float",  "double", "_Bool",
                                       "bool",   "struct", "union",  "enum",    "typedef",  "goto",   "switch"};
         if (peek().kind != Tok::Ident) return;
+        if (otherTypedefs.count(peek().text))
+            failAt(peek().line, "type '" + peek().text + "' not supported (typedef of a non-integer type)");
         for (const char* w : other)
             if (peek().text == w) failAt(peek().line, "'" + peek().text + "' not supported in this prototype");
     }
@@ -748,6 +911,7 @@ struct Translator {
         if (x.op != "index" && x.op != "deref") failAt(x.line, "not an lvalue of the array");
         ExprPtr a = elementAddress(x, pre, t);
         if (t.sd) failAt(x.line, "a whole struct used as a value (use its fields)");
+        isUnsigned = elemType.promotedUnsigned();
         return a;
     }
 
@@ -777,6 +941,7 @@ struct Translator {
         if (e.op == "call") return inlineCall(e, pre, isUnsigned);
         if (e.op == "index" || e.op == "deref" || e.op == "field") {
             ExprPtr a = scalarAddress(e, pre, isUnsigned);
+            if (e.op != "field" && elemType.narrow()) return convert(makeArrayAccess(std::move(a)), elemType);
             return makeArrayAccess(std::move(a));
         }
         if (e.op == "addr") failAt(e.line, "an address used as an integer");
@@ -1108,6 +1273,7 @@ struct Translator {
         } else {
             if (element) ix = reusable(std::move(ix), pre);
             ExprPtr cur = element ? makeArrayAccess(ix->clone()) : makeVar(var);
+            if (element && elemType.narrow() && target->op != "field") cur = convert(std::move(cur), elemType);
             bool curUnsigned = element ? elemUnsigned : varType(var).promotedUnsigned(), operandUnsigned = false,
                  unused = false;
             ExprPtr operand = increment ? makeIntConst(1) : lower(*parseExpr(), pre, operandUnsigned);
@@ -1115,6 +1281,7 @@ struct Translator {
         }
         appendAll(out, pre);
         if (element) {
+            if (elemType.narrow() && target->op != "field") value = convert(std::move(value), elemType);
             out.push_back(makeAssignArray(std::move(ix), std::move(value)));
         } else {
             out.push_back(makeAssign(var, convert(std::move(value), varType(var))));
@@ -1155,7 +1322,8 @@ struct Translator {
         for (;;) {
             int line = peek().line;
             if (eat("*")) {
-                if (type.narrow() || type.isUnsigned) failAt(line, "local pointers must be int *");
+                if (type.bits != elemType.bits || type.isUnsigned != elemType.isUnsigned)
+                    failAt(line, "local pointers must have the array parameter's element type");
                 pointerDeclarator(1, nullptr, out);
                 if (eat(";")) return;
                 expect(",");
@@ -1384,8 +1552,47 @@ struct Translator {
         std::vector<Definition> defs;
         while (peek().kind != Tok::End) {
             size_t start = pos;
+            // Log 209: a typedef of anything but a struct (an array, a pointer,
+            // a function type, a `long`) is skipped; a function that uses its
+            // name is rejected where the type is parsed. Integer typedefs were
+            // already expanded by the lexer.
+            if (isWord("typedef") && !isWord("struct", 1) && !(isWord("const", 1) && isWord("struct", 2))) {
+                int depth = 0;
+                std::string last;
+                while (peek().kind != Tok::End && !(depth == 0 && isPunct(";"))) {
+                    if (isPunct("(") || isPunct("{") || isPunct("[")) ++depth;
+                    if (isPunct(")") || isPunct("}") || isPunct("]")) --depth;
+                    // The declared name: the last identifier outside a parameter
+                    // list, or the one right after `(*` in a function pointer.
+                    if (peek().kind == Tok::Ident && (depth == 0 || (depth == 1 && pos > 0 && toks[pos - 1].kind == Tok::Punct && toks[pos - 1].text == "*")))
+                        last = peek().text;
+                    ++pos;
+                }
+                expect(";");
+                if (!last.empty()) otherTypedefs.insert(last);
+                continue;
+            }
             if (isWord("typedef") || (isWord("struct") && (isPunct("{", 2) || isPunct(";", 2)))) {
-                structDefinition();
+                try {
+                    structDefinition();
+                } catch (const CImportError& e) {
+                    // Remember the names it declares, with the reason, and go on.
+                    std::string why = std::regex_replace(e.what(), std::regex("^line [0-9]+: "), "");
+                    pos = start;
+                    std::vector<std::string> declared;
+                    int depth = 0;
+                    while (peek().kind != Tok::End && !(depth == 0 && isPunct(";"))) {
+                        if (isPunct("{") || isPunct("(") || isPunct("[")) ++depth;
+                        if (isPunct("}") || isPunct(")") || isPunct("]")) --depth;
+                        if (isWord("struct") && peek(1).kind == Tok::Ident) declared.push_back("struct " + peek(1).text);
+                        else if (depth == 0 && peek().kind == Tok::Ident && (isPunct(";", 1) || isPunct(",", 1)))
+                            declared.push_back(peek().text);
+                        ++pos;
+                    }
+                    expect(";");
+                    for (const auto& n : declared)
+                        if (!structs.count(n)) badStructs[n] = why;
+                }
                 continue;
             }
             while (isWord("static") || isWord("inline")) ++pos;
@@ -1474,10 +1681,16 @@ struct Translator {
                 continue;
             }
             rejectOtherTypes();
+            bool constBefore = isWord("const");
             CType type = intType();
             bool pointer = eat("*");
             if (pointer && isWord("const")) ++pos;
-            if (pointer && (type.narrow() || type.isUnsigned)) failAt(line, "the array parameter must be int *");
+            if (pointer && type.isUnsigned && !type.narrow()) failAt(line, "the array parameter must be int * (or a byte/short pointer)");
+            if (pointer && type.wide) failAt(line, "arrays of 64-bit elements not supported");
+            if (pointer && params.empty()) {
+                elemType = type;
+                pointeeConst = constBefore;
+            }
             Param p{ident(), pointer, line, type};
             if (eat("[")) {
                 expect("]");
@@ -1522,11 +1735,18 @@ struct Translator {
                 scopes.back()[params[1].name] = 0;
                 if (params[1].type.isUnsigned) varTypes[0] = params[1].type;
                 ptrs[arrayName] = PtrVar{-1, 1, nullptr};
+                if (elemType.narrow()) {
+                    // log 210: only the returned value is observed (no write-back)
+                    if (!abi.returnsValue) failAt(params[0].line, "void functions over byte/short arrays not supported yet");
+                    abi.pointee = (pointeeConst ? "const " : "") + elemType.spelling;
+                }
             }
         } else {
             if (params.empty()) failAt(peek().line, "functions without parameters not supported");
             if (!abi.returnsValue) failAt(peek().line, "a void function of scalars has no observable result");
             abi.kind = CFunctionAbi::Kind::Scalars;
+            for (const auto& p : params)
+                if (p.type.wide) failAt(p.line, "64-bit scalar parameters not supported (only as an array length)");
             for (size_t i = 0; i < params.size(); ++i) {
                 int v = nextVar++;
                 scopes.back()[params[i].name] = v;
@@ -1807,6 +2027,7 @@ CImport importCFunction(const std::string& source, const std::string& funcName) 
         program->body.insert(program->body.begin(), makeAssign(copy, makeVar(0)));
     }
     t.abi.numVars = std::max(t.nextVar, maxVar(*program) + 1);
+    t.abi.wide32 = t.wideUsed;
     return {std::move(program), t.abi};
 }
 
@@ -1820,6 +2041,7 @@ std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
     Emitter em(abi);
     std::ostringstream& out = em.out;
     out << "/* Generated by algosearch from Mini-C (+ - * wrap through unsigned; / % and shifts as in C). */\n";
+    if (abi.wide32) out << "/* 64-bit types computed in 32 bits: valid while their values fit (log 210). */\n#include <stddef.h>\n#include <stdint.h>\n";
     // The original's signature; inside, every value is an int with the same
     // bits (gcc converts unsigned <-> int modulo 2^32).
     auto type = [&](size_t i) { return (i < abi.paramTypes.size() ? abi.paramTypes[i] : std::string("int")) + " "; };
@@ -1850,7 +2072,7 @@ std::string emitCFunction(const Stmt& program, const CFunctionAbi& abi) {
             }
         }
     } else if (abi.kind == CFunctionAbi::Kind::Array) {
-        out << "int *" << names[0] << ", " << type(1) << names[1] << ") {\n";
+        out << abi.pointee << " *" << names[0] << ", " << type(1) << names[1] << ") {\n";
         out << "    int v0 = " << names[1] << ";\n";
         em.arrName = names[0];
         if (abi.returnsValue) {
@@ -1895,10 +2117,19 @@ bool emittedCopiesArray(const Stmt& program, const CFunctionAbi& abi) {
            writesArrayBeyondResult(program.body, /*topLevel=*/true);
 }
 
-bool needsAdapter(const CFunctionAbi& abi) { return abi.kind == CFunctionAbi::Kind::Array && abi.structFields > 0; }
+bool needsAdapter(const CFunctionAbi& abi) {
+    return abi.kind == CFunctionAbi::Kind::Array && (abi.structFields > 0 || abi.pointee != "int");
+}
 
 std::string abiAdapter(const CFunctionAbi& abi, const std::string& name, const std::string& target) {
     if (!needsAdapter(abi)) return "";
+    if (abi.structFields == 0) {
+        // log 210: a byte/short buffer built from the int array (each value
+        // converted as C converts it); only the returned value is observed.
+        std::string elem = abi.pointee.rfind("const ", 0) == 0 ? abi.pointee.substr(6) : abi.pointee;
+        return "int " + name + "(int *a, int n) { " + elem + " b_[n > 0 ? n : 1]; for (int k_ = 0; k_ < n; k_++) b_[k_] = (" +
+               elem + ")a[k_]; return " + target + "(b_, n); }\n";
+    }
     std::string call = target + "((" + abi.pointee + " *)a" +
                        (abi.hasLength ? ", n / " + std::to_string(abi.structFields) : std::string()) + ")";
     if (abi.returnsValue) return "int " + name + "(int *a, int n) { (void)n; return " + call + "; }\n";
