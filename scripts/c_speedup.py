@@ -243,7 +243,7 @@ def linkable(src, func, out, new, signature=None, adapter=None):
     and a wrapper `new` with the int signature calls it with C's conversions."""
     text = open(src).read()
     # `inline` goes too: a plain C99 `inline` definition emits no symbol.
-    text = re.sub(rf"\bstatic\s+(?:inline\s+)?((?:(?:unsigned\s+)?int|unsigned|uint32_t|int32_t|void)\s+{func}\s*\()",
+    text = re.sub(rf"\bstatic\s+(?:inline\s+)?((?:[A-Za-z_]\w*\s+)+\**\s*{func}\s*\()",
                   r"\1", text)
     flags = [f"-D{func}={new}"]
     if signature:
@@ -327,12 +327,17 @@ def measure(original, candidate, algosearch="./algosearch", n_inputs=None, trial
         out = run([exe, str(trials)], input="\n".join(kept) + "\n", timeout=600)
         t_ref, t_cand, t_noop, mismatches = out.stdout.split()
         t_ref, t_cand, t_noop = float(t_ref), float(t_cand), float(t_noop)
-        results.append((max(t_ref - t_noop, 1e-3), max(t_cand - t_noop, 1e-3), t_noop, int(mismatches)))
+        results.append((max(t_ref - t_noop, 1e-3), max(t_cand - t_noop, 1e-3), t_noop, int(mismatches),
+                        t_ref / t_cand))
     net_ref = (results[0][0] * results[1][0]) ** 0.5
     net_cand = (results[0][1] * results[1][1]) ** 0.5
     return {"func": func, "inputs": len(kept), "ref_ns": net_ref, "cand_ns": net_cand,
             "speedup": net_ref / net_cand, "mismatches": max(r[3] for r in results),
-            "overhead_ns": results[0][2], "order_speedups": [r[0] / r[1] for r in results]}
+            "overhead_ns": results[0][2], "order_speedups": [r[0] / r[1] for r in results],
+            # Log 211: with the empty call subtracted, a ~1 ns function's net time is
+            # within noise and the ratio swings 0.01x-40x; the gross ratio (call included)
+            # is a stable lower bound on the gain.
+            "gross_speedup": (results[0][4] * results[1][4]) ** 0.5}
 
 
 def main():
@@ -357,7 +362,8 @@ def main():
                 inputs_file=a.inputs_file)
     print(f"{r['func']}\tref_ns {r['ref_ns']:.2f}\tcand_ns {r['cand_ns']:.2f}\tspeedup {r['speedup']:.3f}"
           f"\tmismatches {r['mismatches']}\tinputs {r['inputs']}\toverhead_ns {r['overhead_ns']:.2f}"
-          f"\tby_order {r['order_speedups'][0]:.3f}/{r['order_speedups'][1]:.3f}")
+          f"\tby_order {r['order_speedups'][0]:.3f}/{r['order_speedups'][1]:.3f}"
+          + (f"\tgross_speedup {r['gross_speedup']:.3f}" if "gross_speedup" in r else ""))
     sys.exit(1 if r["mismatches"] else 0)
 
 

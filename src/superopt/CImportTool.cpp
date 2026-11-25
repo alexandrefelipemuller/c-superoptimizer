@@ -12,6 +12,7 @@
 #include "language/PrettyPrinter.hpp"
 #include "problems/ReferenceProblem.hpp"
 #include "superopt/CFrontend.hpp"
+#include "superopt/CompiledTimer.hpp"
 #include "superopt/Superoptimizer.hpp"
 
 namespace algosearch {
@@ -143,7 +144,7 @@ int runCImportTool(int argc, char** argv) {
         std::cout << "// " << imp.abi.name << ": abi=" << kindName(imp.abi.kind)
                   << " returns=" << (imp.abi.returnsValue ? "int" : "void")
                   << " params=" << imp.abi.params.size() << " vars=" << imp.abi.numVars
-                  << " size=" << imp.program->size() << (narrowSignature(imp.abi) ? " narrow=1" : "") << (needsAdapter(imp.abi) ? " adapter=1" : "") << "\n";
+                  << " size=" << imp.program->size() << (narrowSignature(imp.abi) ? " narrow=1" : "") << (needsAdapter(imp.abi) ? " adapter=1" : "") << (imp.abi.wide32 ? " wide32=1" : "") << "\n";
         std::cout << printStmt(*imp.program);
         return 0;
     } catch (const CImportError& e) {
@@ -241,6 +242,30 @@ int runSuperoptTool(int argc, char** argv) {
         // Inputs on which the reference needs more than 1M steps are outside
         // the domain the result is checked on (docs/superopt.md).
         ReferenceProblem problem(std::move(imp), vars, cfg.seed, 1'000'000);
+        if (problem.abi().wide32) {
+            // Log 210: 64-bit types are computed in 32 bits. Before searching,
+            // the original (compiled, with its real types) must agree with the
+            // emitted reference on the test inputs; otherwise the model is
+            // wrong for this function and nothing it finds would be valid.
+            std::vector<std::vector<int>> inputs;
+            int top = problem.abi().kind == CFunctionAbi::Kind::Scalars ? 31 : 16;
+            for (int level = 1; level <= top; ++level)
+                for (const auto& inst : problem.generateInstances(level))
+                    if (problem.definesAnswer(inst.input)) inputs.push_back(inst.input);
+            for (const auto& w : cfg.userWorkload) inputs.push_back(w);
+            CompiledTimer gate(cfg.originalSource, problem.abi(), inputs, cfg.workDir + "/wide32");
+            CompiledTimer::Check c = gate.check(emitCFunction(problem.referenceProgram(), problem.abi()));
+            if (!c.ok) {
+                std::cerr << "wide32 gate could not run: " << c.error << "\n";
+                return 1;
+            }
+            std::cout << "wide32_gate " << c.mismatches << " of " << c.inputs << " inputs differ\n";
+            if (c.mismatches > 0) {
+                std::cerr << "the 32-bit model of the 64-bit types is wrong for this function (first input #"
+                          << c.firstBad << "); not superoptimized\n";
+                return 1;
+            }
+        }
         Superoptimizer opt(problem, cfg);
         SuperoptResult r = opt.run();
         double ratio = r.bestCost > 0 ? static_cast<double>(r.referenceCost) / static_cast<double>(r.bestCost) : 0.0;
@@ -249,6 +274,8 @@ int runSuperoptTool(int argc, char** argv) {
                   << "\nevaluated " << r.evaluated << "\ncorrect " << r.correct << "\ntests " << r.tests
                   << "\ncounterexamples " << r.counterexamples << "\nuser_workload " << r.userWorkload << "\nverified " << (r.verified ? "yes" : "NO")
                   << (r.verified ? "" : " (" + r.verifyReason + ")") << "\n";
+        // Log 210: the result holds only while the 64-bit values fit in 32 bits.
+        if (imp.abi.wide32) std::cout << "assumption wide32 (64-bit types computed in 32 bits)\n";
         if (cfg.timeTopK > 0) {
             std::cout << "timings " << r.timings << "\ntiming_seconds " << r.timingSeconds << "\ntiming_context " << r.timingContext << "\ncross_context_self_control " << r.crossContextSelfControl << "\ncross_context_speedup " << r.crossContextSpeedup << "\ncross_context_rejected " << r.crossContextRejected << "\nself_control "
                       << r.selfControl << "\nconfirm_self_control " << r.confirmSelfControl << "\nnoise_threshold " << r.noiseThreshold << "\nemitted_reference "

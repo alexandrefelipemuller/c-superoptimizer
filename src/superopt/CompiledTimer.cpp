@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <regex>
+#include <set>
 #include <sstream>
 
 namespace algosearch {
@@ -37,6 +38,11 @@ __attribute__((noinline, aligned(64))) static long long run_cand(int reps) {
         for (int i = 0; i < h_nin; i++) { %CALL_CAND% }
     return acc;
 }
+static long long h_check(int i, int side) {
+    long long acc = 0;
+    if (side) { %CALL_CAND% } else { %CALL_REF% }
+    return acc;
+}
 static int h_cmp(const void *a, const void *b) { double x = *(const double *)a, y = *(const double *)b; return x < y ? -1 : x > y; }
 int main(int argc, char **argv) {
     int trials = atoi(argv[2]);
@@ -51,6 +57,13 @@ int main(int argc, char **argv) {
         h_nin++;
     }
     fclose(f);
+    if (argc > 3) {  /* log 210: differential check, no timing */
+        long long bad = 0; int first = -1;
+        for (int i = 0; i < h_nin; i++)
+            if (h_check(i, 0) != h_check(i, 1)) { bad++; if (first < 0) first = i; }
+        printf("%lld %d %d\n", bad, first, h_nin);
+        return 0;
+    }
     int reps = 1;
     for (;;) { double t0 = h_now(); h_sink += run_ref(reps); if (h_now() - t0 > 4e6 || reps > (1 << 22)) break; reps *= 2; }
     h_sink += run_cand(reps);
@@ -80,12 +93,22 @@ std::string replaceAll(std::string s, const std::string& from, const std::string
 // an original with helpers can be timed against itself in one unit); the
 // timed function becomes `<prefix>fn`.
 std::string prefixFunctions(const std::string& src, const std::string& prefix, const std::string& target) {
-    static const std::regex def("\\b(?:int|void|int32_t|unsigned|uint32_t|char|short|uint8_t|int8_t|uint16_t|int16_t)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
+    static const std::regex def("\\b(?:int|void|int32_t|unsigned|uint32_t|char|short|uint8_t|int8_t|uint16_t|int16_t|"
+                                "long|size_t|ssize_t|uint64_t|int64_t|ptrdiff_t|uintptr_t|intptr_t)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
+    // Log 210: also definitions whose return type is a typedef name
+    // (`static uLong f(`, `psa_status_t g(`), at the start of a line.
+    static const std::regex typedefDef("(?:^|\\n)[ \\t]*(?:static[ \\t]+|inline[ \\t]+)*(?:const[ \\t]+)?([A-Za-z_][A-Za-z0-9_]*)"
+                                       "[ \\t\\*]+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*\\(");
+    static const std::set<std::string> notTypes = {"return", "typedef", "else", "if", "while", "for", "do", "switch",
+                                                   "case", "goto", "sizeof", "struct", "union", "enum"};
+    std::set<std::string> names = {target};
+    for (auto it = std::sregex_iterator(src.begin(), src.end(), def); it != std::sregex_iterator(); ++it)
+        names.insert((*it)[1].str());
+    for (auto it = std::sregex_iterator(src.begin(), src.end(), typedefDef); it != std::sregex_iterator(); ++it)
+        if (!notTypes.count((*it)[1].str()) && !notTypes.count((*it)[2].str())) names.insert((*it)[2].str());
     std::string out = src;
-    for (auto it = std::sregex_iterator(src.begin(), src.end(), def); it != std::sregex_iterator(); ++it) {
-        std::string name = (*it)[1].str();
+    for (const auto& name : names)
         out = std::regex_replace(out, std::regex("\\b" + name + "\\b"), prefix + (name == target ? "fn" : name));
-    }
     return out;
 }
 
@@ -126,6 +149,80 @@ CompiledTimer::CompiledTimer(std::string originalSource, CFunctionAbi abi, std::
     }
 }
 
+CompiledTimer::Check CompiledTimer::check(const std::string& candidateSource) const {
+    Check c;
+    std::string base = workDir_ + "/c" + std::to_string(compilations_++);
+    {
+        std::ofstream(base + ".c") << harnessSource(candidateSource);
+    }
+    std::string cc = "gcc -O2 -fwrapv -w '" + base + ".c' -o '" + base + "' 2> '" + base + ".err'";
+    if (std::system(cc.c_str()) != 0) {
+        std::ifstream err(base + ".err");
+        std::stringstream ss;
+        ss << err.rdbuf();
+        c.error = "gcc failed: " + ss.str().substr(0, 300);
+        return c;
+    }
+    std::string cmd = "timeout 120 '" + base + "' '" + inputsPath_ + "' 1 check";
+    FILE* p = popen(cmd.c_str(), "r");
+    if (p) {
+        if (std::fscanf(p, "%lld %d %d", &c.mismatches, &c.firstBad, &c.inputs) == 3) c.ok = true;
+        if (pclose(p) != 0) c.ok = false;
+    }
+    if (!c.ok) c.error = "check run failed";
+    std::remove((base + ".c").c_str());
+    std::remove(base.c_str());
+    return c;
+}
+
+std::string CompiledTimer::harnessSource(const std::string& candidateSource) const {
+    std::string src = harnessTemplate;
+    std::string ref = prefixFunctions(originalSource_, "ref_", abi_.name);
+    std::string cand = prefixFunctions(candidateSource, "cand_", abi_.name);
+    // Log 210: the candidate may be the original itself (self-control), so
+    // every type name the original declares (struct tags, typedefs: a unit
+    // cut from a real translation unit carries many) is renamed on the
+    // candidate's side by macros, as the adapter ABIs already did.
+    std::set<std::string> typeNames(abi_.structNames.begin(), abi_.structNames.end());
+    static const std::regex tagDef("\\b(?:struct|union|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\{");
+    static const std::regex typedefWord("\\btypedef\\b");
+    static const std::regex fnPtrName("\\(\\s*\\*\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\)");
+    static const std::regex lastIdent("([A-Za-z_][A-Za-z0-9_]*)\\s*(?:\\[[^\\]]*\\]\\s*)*$");
+    for (auto it = std::sregex_iterator(originalSource_.begin(), originalSource_.end(), tagDef); it != std::sregex_iterator(); ++it)
+        typeNames.insert((*it)[1].str());
+    // Each typedef up to its `;` at brace depth 0, the braces' contents dropped
+    // (`typedef struct { ...; } T;`).
+    for (auto it = std::sregex_iterator(originalSource_.begin(), originalSource_.end(), typedefWord); it != std::sregex_iterator(); ++it) {
+        std::string body;
+        int depth = 0;
+        for (size_t k = static_cast<size_t>(it->position() + it->length()); k < originalSource_.size(); ++k) {
+            char ch = originalSource_[k];
+            if (ch == '{') ++depth;
+            if (ch == '}') --depth;
+            if (ch == ';' && depth == 0) break;
+            if (depth == 0 && ch != '}') body += ch;
+        }
+        std::smatch m;
+        if (std::regex_search(body, m, fnPtrName) || std::regex_search(body, m, lastIdent)) typeNames.insert(m[1].str());
+    }
+    std::string on, off;
+    for (const auto& n : typeNames) {
+        on += "#define " + n + " cand_struct_" + n + "\n";
+        off += "#undef " + n + "\n";
+    }
+    if (needsAdapter(abi_)) {
+        ref += "\n" + abiAdapter(abi_, "ref_fn_abi", "ref_fn");
+        cand = on + cand + "\n" + abiAdapter(abi_, "cand_fn_abi", "cand_fn") + off;
+    } else {
+        cand = on + cand + "\n" + off;
+    }
+    src = replaceAll(src, "%REF%", ref);
+    src = replaceAll(src, "%CAND%", cand);
+    src = replaceAll(src, "%CALL_REF%", callFor(abi_, "ref_fn", byteType_));
+    src = replaceAll(src, "%CALL_CAND%", callFor(abi_, "cand_fn", byteType_));
+    return src;
+}
+
 CompiledTimer::Timing CompiledTimer::time(const std::string& candidateSource, int trials) const {
     Timing t;
     if (!programTimer_.empty()) {
@@ -152,25 +249,10 @@ CompiledTimer::Timing CompiledTimer::time(const std::string& candidateSource, in
         std::remove((path + ".err").c_str());
         return t;
     }
-    std::string src = harnessTemplate;
     // log 208d: struct ABIs are called through an int adapter. Both sources
     // define the structs (the candidate may be the original itself), so the
     // candidate's struct tags and typedef names are renamed by macros.
-    std::string ref = prefixFunctions(originalSource_, "ref_", abi_.name);
-    std::string cand = prefixFunctions(candidateSource, "cand_", abi_.name);
-    if (needsAdapter(abi_)) {
-        ref += "\n" + abiAdapter(abi_, "ref_fn_abi", "ref_fn");
-        std::string on, off;
-        for (const auto& n : abi_.structNames) {
-            on += "#define " + n + " cand_struct_" + n + "\n";
-            off += "#undef " + n + "\n";
-        }
-        cand = on + cand + "\n" + abiAdapter(abi_, "cand_fn_abi", "cand_fn") + off;
-    }
-    src = replaceAll(src, "%REF%", ref);
-    src = replaceAll(src, "%CAND%", cand);
-    src = replaceAll(src, "%CALL_REF%", callFor(abi_, "ref_fn", byteType_));
-    src = replaceAll(src, "%CALL_CAND%", callFor(abi_, "cand_fn", byteType_));
+    std::string src = harnessSource(candidateSource);
     std::string base = workDir_ + "/t" + std::to_string(compilations_++);
     {
         std::ofstream(base + ".c") << src;

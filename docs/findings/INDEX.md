@@ -382,3 +382,6 @@ Generated from the headers of `FINDINGS.md` as it stood at commit `5706b0c` (tag
 | 207. (registered) Greedy composition of region winners, each set timed in its program per file (scripts/compose_regions.py); normal and planted-ctrl compositions, big.png end-to-end gate | 11_sections_121-125.md | 3526 |
 | 207. (results) Composition: normal accepts nothing (206 regression blocked), ctrl keeps slide_hash 3.62x and pngtest 0.896 on 15/15; paired-wins rule needed | 11_sections_121-125.md | 3567 |
 | 207. (findings) Region thread 200–207 consolidated: 13 measurement findings (harness codegen, non-composition, neighbour spelling, dilution, double counting, paired wins, wrap baseline, test-input share), correctness fixes, open items | 11_sections_121-125.md | 3619 |
+| 209. gcc -E preprocessing slicer (scripts/c_preprocess.py), integer typedefs in the lexer; census 13 -> 37 of 7,007 on 5 bases | 11_sections_121-125.md | 3675 |
+| 210. What-if census (all lifts 37 -> 71, 1.01%); byte/short arrays and wide32 (64-bit in 32 bits, compiled gate refuses 3); array fuzz from generated seeds; census 37 -> 45 | 11_sections_121-125.md | 3679 |
+| 211. Battery on 45 real functions: 126 winners equivalent; c_speedup gross ratio; gains by context (28 call+inline, 21 inline only); key_type_is_raw_bytes is an LCP stall | 11_sections_121-125.md | 3693 |

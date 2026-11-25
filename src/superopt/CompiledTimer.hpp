@@ -36,6 +36,17 @@ public:
     // emitCFunction output, or the original itself for a self-control).
     Timing time(const std::string& candidateSource, int trials = 11) const;
 
+    // Log 210: the candidate against the original, compiled, once on every
+    // workload input (results compared; for void array functions, element 0).
+    struct Check {
+        bool ok = false;
+        long long mismatches = 0;
+        int firstBad = -1;  // index into the workload
+        int inputs = 0;
+        std::string error;
+    };
+    Check check(const std::string& candidateSource) const;
+
     // Unary scalar functions only (log 192): the candidate against the
     // original, compiled, on all 2^32 arguments. `complete` is false when it
     // did not finish within `timeoutSeconds` (nothing proven then).
@@ -52,6 +63,7 @@ public:
     int compilations() const { return compilations_; }
 
 private:
+    std::string harnessSource(const std::string& candidateSource) const;
     std::string originalSource_;
     CFunctionAbi abi_;
     std::string workDir_;

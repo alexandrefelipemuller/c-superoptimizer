@@ -123,8 +123,8 @@ def linkable(src, func, out, new, signature=None, adapter=None):
     and a wrapper `new` with the int signature calls it with C's conversions."""
     text = open(src).read()
     # `inline` goes too: a plain C99 `inline` definition emits no symbol.
-    text = re.sub(rf"\bstatic\s+(?:inline\s+)?((?:(?:unsigned\s+)?int|unsigned|uint32_t|int32_t|void)\s+{func}\s*\()",
-                  r"\1", text)
+    # Log 210: any return type, typedef names included (`static U32 f(`).
+    text = re.sub(rf"\bstatic\s+(?:inline\s+)?((?:[A-Za-z_]\w*\s+)+\**\s*{func}\s*\()", r"\1", text)
     flags = [f"-D{func}={new}"]
     if signature:
         abi, returns, params = signature

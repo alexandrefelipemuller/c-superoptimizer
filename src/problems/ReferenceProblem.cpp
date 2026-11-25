@@ -7,10 +7,29 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "ast/Stmt.hpp"
 #include "core/Random.hpp"
 #include "problems/ArrayInstances.hpp"
 
 namespace algosearch {
+
+namespace {
+
+// Log 210: the integer constants of a program (comparisons against '\\',
+// 0xe2, ...), for dictionary inputs.
+void collectConstants(const Expr* e, std::vector<int>& out) {
+    if (!e) return;
+    if (e->kind == ExprKind::IntConst) out.push_back(e->intValue);
+    collectConstants(e->lhs.get(), out);
+    collectConstants(e->rhs.get(), out);
+}
+void collectConstants(const Stmt& s, std::vector<int>& out) {
+    for (const Expr* e : {s.valueExpr.get(), s.indexExpr.get(), s.indexExpr2.get(), s.cond.get()}) collectConstants(e, out);
+    for (const auto& b : s.body) collectConstants(*b, out);
+    for (const auto& b : s.elseBody) collectConstants(*b, out);
+}
+
+}  // namespace
 
 namespace {
 
@@ -125,6 +144,30 @@ std::vector<Instance> ReferenceProblem::generateInstances(int level) const {
         }
         for (auto& a : randomArraysOver(n, -n - 2, n + 2, instancesPerLevel / 2, seed_ + 7919ULL * n)) inputs.push_back(a);
         for (auto& a : generateStructuralArrays(n, seed_, 1, 4)) inputs.push_back(a);
+        // Log 210: byte/short buffers are compared against character
+        // constants that small random values never reach (a candidate that
+        // ignored "\\\n" won at 4.2x). Half of these arrays draw each element
+        // from the reference's constants (and their neighbours), as a
+        // dictionary fuzzer does; int arrays keep their inputs unchanged.
+        if (abi_.structFields == 0 && abi_.pointee != "int" && n > 0) {
+            std::vector<int> dict;
+            collectConstants(*reference_, dict);
+            std::vector<int> words;
+            for (int c : dict)
+                for (int d : {c - 1, c, c + 1})
+                    if (d >= -128 && d <= 255) words.push_back(d);
+            std::sort(words.begin(), words.end());
+            words.erase(std::unique(words.begin(), words.end()), words.end());
+            if (!words.empty()) {
+                for (int i = 0; i < instancesPerLevel; ++i) {
+                    std::vector<int> a(static_cast<size_t>(n));
+                    for (auto& x : a)
+                        x = rng.uniformInt(0, 9) < 7 ? words[static_cast<size_t>(rng.uniformInt(0, static_cast<int>(words.size()) - 1))]
+                                                     : rng.uniformInt(-128, 255);
+                    inputs.push_back(std::move(a));
+                }
+            }
+        }
         return toInstances(inputs);
     }
     int m = magnitude(level);

@@ -1158,8 +1158,16 @@ SuperoptResult Superoptimizer::run() {
     const std::vector<std::vector<int>> boundary = boundaryInputs(problem_.referenceProgram(), abi);
     // Mutation fuzz (log 199c): the workload's value range, and the constants
     // (+-2) of the reference and the candidate.
+    // Log 210: without a user workload, array winners are fuzzed from the
+    // generated test inputs (they used to stop at `tested`: a byte-buffer
+    // winner that ignored "\\\n" passed at 4.2x).
+    std::vector<std::vector<int>> fuzzSeeds = userWorkload_;
+    if (fuzzSeeds.empty() && abi.kind == CFunctionAbi::Kind::Array)
+        for (int level = 1; level <= 16; ++level)
+            for (const auto& inst : problem_.generateInstances(level))
+                if (!inst.input.empty()) fuzzSeeds.push_back(inst.input);
     int wlLo = 0, wlHi = 0;
-    for (const auto& in : userWorkload_)
+    for (const auto& in : fuzzSeeds)
         for (int v : in) { wlLo = std::min(wlLo, v); wlHi = std::max(wlHi, v); }
     auto mutationConsts = [&](const Stmt& p) {
         std::set<long long> cs, vs;
@@ -1175,7 +1183,7 @@ SuperoptResult Superoptimizer::run() {
         Random r(config_.seed ^ 0x6a09e667f3bcc909ULL);
         std::vector<int> pc = mutationConsts(p), o;
         for (int i = 0; i < 200000; ++i) {
-            const auto& seed = userWorkload_[static_cast<size_t>(r.uniformInt(0, static_cast<int>(userWorkload_.size()) - 1))];
+            const auto& seed = fuzzSeeds[static_cast<size_t>(r.uniformInt(0, static_cast<int>(fuzzSeeds.size()) - 1))];
             std::vector<int> in = mutateInput(seed, r, wlLo, wlHi, pc);
             long steps = problem_.referenceSteps(in);
             if (steps >= 0 && !agrees(p, in, stepBudget(steps), o)) return true;
@@ -1615,7 +1623,7 @@ SuperoptResult Superoptimizer::run() {
                         continue;
                     }
                     result.equivalence = x.complete ? "exhaustive" : "tested";
-                } else if (abi.kind == CFunctionAbi::Kind::Array && !userWorkload_.empty()) {
+                } else if (abi.kind == CFunctionAbi::Kind::Array && !fuzzSeeds.empty()) {
                     if (fuzzRefutes(*timed[k].program)) {
                         ++result.fuzzRejected;
                         if (config_.verbose) std::cerr << "mutation fuzz refutes a timed winner\n";
